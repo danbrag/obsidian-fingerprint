@@ -74,9 +74,10 @@ export default class TouchIDLockPlugin extends Plugin {
 		// Re-evaluate note overlays whenever the layout, the open file, or the
 		// note's own frontmatter changes.
 		const refreshGuard = () => this.noteGuard.refresh();
-		this.registerEvent(this.app.workspace.on("file-open", refreshGuard));
+		const activeNoteChanged = () => this.noteGuard.onActiveNoteChange();
+		this.registerEvent(this.app.workspace.on("file-open", activeNoteChanged));
 		this.registerEvent(this.app.workspace.on("layout-change", refreshGuard));
-		this.registerEvent(this.app.workspace.on("active-leaf-change", refreshGuard));
+		this.registerEvent(this.app.workspace.on("active-leaf-change", activeNoteChanged));
 		this.registerEvent(this.app.metadataCache.on("changed", refreshGuard));
 
 		this.registerDomEvent(window, "blur", () => this.onWindowBlur());
@@ -102,7 +103,7 @@ export default class TouchIDLockPlugin extends Plugin {
 
 	private async onLayoutReady(): Promise<void> {
 		this.resetIdleWatcher();
-		this.noteGuard.refresh();
+		this.noteGuard.onActiveNoteChange();
 
 		if (this.firstRun) {
 			// No data.json yet: install the native helper and prompt for a
@@ -290,6 +291,9 @@ export default class TouchIDLockPlugin extends Plugin {
 	}
 
 	private onWindowBlur(): void {
+		if (this.settings.perNoteLockEnabled && this.settings.relockNotesOnBlur) {
+			this.noteGuard.lockAll();
+		}
 		if (!this.settings.lockOnBlur || this.locked) return;
 		this.resetBlurWatcher();
 		const delayMs = Math.max(0, this.settings.lockOnBlurDelaySeconds * 1000);

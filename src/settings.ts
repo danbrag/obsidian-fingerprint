@@ -30,6 +30,8 @@ export interface TouchIDLockSettings {
 	securityKeys: SecurityKeyInfo[];
 	/** Cover individual notes flagged with the frontmatter property below. */
 	perNoteLockEnabled: boolean;
+	relockOnNoteLeave: boolean;
+	relockNotesOnBlur: boolean;
 	/** Frontmatter property that marks a note as locked. */
 	lockedNoteProperty: string;
 }
@@ -49,6 +51,8 @@ export const DEFAULT_SETTINGS: TouchIDLockSettings = {
 	securityKeyEnabled: false,
 	securityKeys: [],
 	perNoteLockEnabled: false,
+	relockOnNoteLeave: false,
+	relockNotesOnBlur: false,
 	lockedNoteProperty: "fingerprint-lock",
 };
 
@@ -165,7 +169,9 @@ export class TouchIDLockSettingTab extends PluginSettingTab {
 				}
 				break;
 			case "perNoteLockEnabled":
-				settings.perNoteLockEnabled = value === true;
+			case "relockOnNoteLeave":
+			case "relockNotesOnBlur":
+				settings[key] = value === true;
 				break;
 			case "lockedNoteProperty":
 				settings.lockedNoteProperty =
@@ -337,6 +343,18 @@ export class TouchIDLockSettingTab extends PluginSettingTab {
 					name: "Lock individual notes",
 					desc: "Cover flagged notes until you authenticate.",
 					control: { type: "toggle", key: "perNoteLockEnabled", defaultValue: false },
+				},
+				{
+					name: "Relock when leaving note",
+					desc: "Relock a protected note when you switch to another note or pane. The vault stays unlocked.",
+					visible: () => this.plugin.settings.perNoteLockEnabled,
+					control: { type: "toggle", key: "relockOnNoteLeave", defaultValue: false },
+				},
+				{
+					name: "Relock protected notes when Obsidian loses focus",
+					desc: "Relock all protected notes on window focus loss, independently of the global lock on blur setting.",
+					visible: () => this.plugin.settings.perNoteLockEnabled,
+					control: { type: "toggle", key: "relockNotesOnBlur", defaultValue: false },
 				},
 				{
 					name: "Frontmatter property",

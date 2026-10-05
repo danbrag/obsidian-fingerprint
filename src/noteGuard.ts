@@ -22,6 +22,7 @@ export class NoteGuard {
 	private readonly plugin: TouchIDLockPlugin;
 	/** Note paths unlocked for this session; cleared whenever the vault locks. */
 	private readonly unlockedPaths = new Set<string>();
+	private activePath: string | null = null;
 	/** Overlay currently covering each guarded view container. */
 	private readonly overlays = new Map<HTMLElement, HTMLElement>();
 	private busy = false;
@@ -62,6 +63,16 @@ export class NoteGuard {
 		this.refresh();
 	}
 
+	/** Active-note changes revoke only the note being left, never the vault. */
+	onActiveNoteChange(): void {
+		const path = this.app.workspace.getActiveFile()?.path ?? null;
+		if (path !== this.activePath && this.plugin.settings.relockOnNoteLeave && this.activePath) {
+			this.unlockedPaths.delete(this.activePath);
+		}
+		this.activePath = path;
+		this.refresh();
+	}
+
 	/** Adds or removes an overlay on every open markdown view, as needed. */
 	refresh(): void {
 		const seen = new Set<HTMLElement>();
@@ -76,6 +87,13 @@ export class NoteGuard {
 			if (!shouldGuard || !file) continue;
 
 			seen.add(container);
+			// A leaf can switch directly between two locked notes. Its unlock
+			// buttons must refer to the new file, not the previous overlay's file.
+			const existing = this.overlays.get(container);
+			if (existing && existing.dataset.notePath !== file.path) {
+				existing.remove();
+				this.overlays.delete(container);
+			}
 			if (!this.overlays.has(container)) {
 				this.overlays.set(container, this.createOverlay(container, file));
 			}
@@ -102,6 +120,7 @@ export class NoteGuard {
 	private createOverlay(container: HTMLElement, file: TFile): HTMLElement {
 		container.addClass("fingerprint-note-guarded");
 		const overlay = container.createDiv({ cls: "fingerprint-note-overlay" });
+		overlay.dataset.notePath = file.path;
 		const card = overlay.createDiv({ cls: "fingerprint-note-card" });
 		card.createDiv({ cls: "fingerprint-note-icon", text: "\u{1F512}" });
 		card.createDiv({ cls: "fingerprint-note-title", text: "This note is locked" });
@@ -152,7 +171,7 @@ export class NoteGuard {
 		btn.disabled = false;
 
 		if (result.status === "success") {
-			this.unlockNote(file);
+			this.unlockNote(file, status);
 			return;
 		}
 		status.setText(
@@ -173,7 +192,7 @@ export class NoteGuard {
 		btn.disabled = false;
 
 		if (result.status === "success") {
-			this.unlockNote(file);
+			this.unlockNote(file, status);
 			return;
 		}
 		status.setText(`Security key failed: ${result.message}`);
@@ -187,7 +206,7 @@ export class NoteGuard {
 		this.busy = false;
 
 		if (ok) {
-			this.unlockNote(file);
+			this.unlockNote(file, status);
 			return;
 		}
 		input.value = "";
@@ -195,7 +214,12 @@ export class NoteGuard {
 		status.setText("Wrong password.");
 	}
 
-	private unlockNote(file: TFile): void {
+	private unlockNote(file: TFile, status: HTMLElement): void {
+		// Ignore authentication completed after the note was replaced or the
+		// vault locked. A departed note must not become unlocked in the background.
+		if (!status.isConnected || this.plugin.isLocked) return;
+		if (this.plugin.settings.relockOnNoteLeave && this.app.workspace.getActiveFile()?.path !== file.path) return;
+		if (this.plugin.settings.relockNotesOnBlur && !document.hasFocus()) return;
 		this.unlockedPaths.add(file.path);
 		this.refresh();
 	}

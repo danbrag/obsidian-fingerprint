@@ -160,6 +160,35 @@ the vault lock screen — Touch ID or Windows Hello, a security key, or your
 fallback password. An unlocked note stays open until the vault locks, at
 which point every note re-locks with it.
 
+This personal fork adds two settings under **Per-note lock**, both off by default:
+
+- **Relock when leaving note** — switching from protected Note A to another
+  note revokes A's unlock. Returning to A requires authentication again.
+- **Relock protected notes when Obsidian loses focus** — relocks all protected
+  notes immediately when the main Obsidian window loses focus.
+
+These options affect protected notes only and do not lock the vault. Existing
+global **Lock on blur** and **Lock on idle** settings still operate independently;
+turn them off if you want only protected notes to relock. Unlock state is shared
+by note path across panes: switching to a different note relocks the previous
+note in every pane, while switching between panes of the same note keeps it
+unlocked. Focus-loss handling uses the existing main-window listener; separate
+pop-out windows are not independently tracked. Per-note inactivity relocking
+is not implemented. Markdown files remain plaintext.
+
+### Installing this personal fork
+
+Check out `feature/per-note-auto-relock` from
+[danbrag/obsidian-fingerprint](https://github.com/danbrag/obsidian-fingerprint),
+then run `npm install` and `npm run build`. With Obsidian closed, copy **only**
+`main.js`, `manifest.json`, and `styles.css` into
+`<YourVault>/.obsidian/plugins/fingerprint-lock/` (create it if needed). Preserve
+any existing `data.json` and `native/` folder. Reopen Obsidian and enable
+**Fingerprint Lock**, then enable **Lock individual notes** and the desired
+relock options. The native helpers are bundled into `main.js` and set up on load.
+Community-plugin updates can overwrite this personal build; reinstall these
+three files if that happens.
+
 > [!warning]
 > **This hides notes; it does not encrypt them.** The text stays plaintext on
 > disk and is readable by any other plugin, by your sync client, and by
