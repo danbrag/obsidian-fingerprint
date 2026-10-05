@@ -36,7 +36,9 @@ export default class TouchIDLockPlugin extends Plugin {
 	helperSetupError: string | null = null;
 	private locked = false;
 	private promptOnReturn = false;
-	private promptNoteOnReturn = false;
+	private authenticating = false;
+	private unloaded = false;
+	private authFocusTimeoutId: number | null = null;
 
 	private blurTimeoutId: number | null = null;
 	private idleIntervalId: number | null = null;
@@ -45,6 +47,7 @@ export default class TouchIDLockPlugin extends Plugin {
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
+		if (this.unloaded) return;
 
 		const pluginDir = this.manifest.dir ?? "";
 		this.nativeHelperPath = getNativeHelperPath(this.app.vault, pluginDir);
@@ -94,16 +97,10 @@ export default class TouchIDLockPlugin extends Plugin {
 		this.app.workspace.onLayoutReady(() => {
 			void this.onLayoutReady();
 		});
-
-		this.register(() => {
-			if (this.blurTimeoutId !== null) window.clearTimeout(this.blurTimeoutId);
-			if (this.idleIntervalId !== null) window.clearInterval(this.idleIntervalId);
-			this.lockScreen.hide();
-			this.noteGuard.clear();
-		});
 	}
 
 	private async onLayoutReady(): Promise<void> {
+		if (this.unloaded) return;
 		this.resetIdleWatcher();
 		this.noteGuard.onActiveNoteChange();
 
@@ -173,10 +170,12 @@ export default class TouchIDLockPlugin extends Plugin {
 	}
 
 	onunload(): void {
+		this.unloaded = true;
+		if (this.authFocusTimeoutId !== null) window.clearTimeout(this.authFocusTimeoutId);
 		if (this.blurTimeoutId !== null) window.clearTimeout(this.blurTimeoutId);
 		if (this.idleIntervalId !== null) window.clearInterval(this.idleIntervalId);
-		this.lockScreen.hide();
-		this.noteGuard.clear();
+		this.lockScreen?.hide();
+		this.noteGuard?.clear();
 	}
 
 	async loadSettings(): Promise<void> {
@@ -190,7 +189,7 @@ export default class TouchIDLockPlugin extends Plugin {
 	}
 
 	lock(): void {
-		if (this.locked) return;
+		if (this.unloaded || this.locked) return;
 		this.locked = true;
 		this.promptOnReturn = !document.hasFocus();
 		// Re-lock individual notes alongside the vault, so unlocking the vault
@@ -205,7 +204,7 @@ export default class TouchIDLockPlugin extends Plugin {
 	 * the Touch ID helper not yet built and no fallback password).
 	 */
 	private startupLock(): void {
-		if (!this.settings.globalAutoLockEnabled || !this.settings.lockOnStartup) return;
+		if (this.unloaded || !this.settings.globalAutoLockEnabled || !this.settings.lockOnStartup) return;
 		if (!this.hasUsableUnlockMethod()) {
 			new Notice(
 				`Vault was NOT locked: no unlock method is available. Build the ${this.biometricMethodName} ` +
@@ -237,6 +236,7 @@ export default class TouchIDLockPlugin extends Plugin {
 	}
 
 	unlock(): void {
+		if (this.unloaded || !this.locked) return;
 		this.locked = false;
 		this.promptOnReturn = false;
 		this.lockScreen.hide();
@@ -246,6 +246,31 @@ export default class TouchIDLockPlugin extends Plugin {
 
 	get isLocked(): boolean {
 		return this.locked;
+	}
+
+	get isAuthenticating(): boolean {
+		return this.authenticating;
+	}
+
+	/** Serialize vault/note unlocks and keep native-dialog blur out of lock policy. */
+	async authenticate<T>(operation: () => Promise<T>): Promise<T | null> {
+		if (this.authenticating || this.unloaded) return null;
+		this.authenticating = true;
+		try {
+			const result = await operation();
+			return this.unloaded ? null : result;
+		} finally {
+			this.authenticating = false;
+			this.lastActivityAt = Date.now();
+			// Let renderer focus settle after the native dialog closes. If the
+			// user really switched apps, apply lock policy without queuing a retry.
+			if (!this.unloaded && !document.hasFocus()) {
+				this.authFocusTimeoutId = window.setTimeout(() => {
+					this.authFocusTimeoutId = null;
+					if (!this.unloaded && !document.hasFocus()) this.onWindowBlur(false);
+				}, 0);
+			}
+		}
 	}
 
 	async runBiometricAuth(): Promise<BiometricResult> {
@@ -287,7 +312,7 @@ export default class TouchIDLockPlugin extends Plugin {
 
 		this.lastActivityAt = Date.now();
 		this.idleIntervalId = window.setInterval(() => {
-			if (this.locked || !this.settings.globalAutoLockEnabled || !this.settings.lockOnIdle) return;
+			if (this.locked || this.authenticating || !this.settings.globalAutoLockEnabled || !this.settings.lockOnIdle) return;
 			const idleSeconds = (Date.now() - this.lastActivityAt) / 1000;
 			if (idleSeconds >= this.settings.lockOnIdleDelaySeconds) {
 				this.lock();
@@ -295,11 +320,9 @@ export default class TouchIDLockPlugin extends Plugin {
 		}, IDLE_CHECK_INTERVAL_MS);
 	}
 
-	private onWindowBlur(): void {
-		// Native authentication dialogs can also blur Obsidian. Do not queue
-		// another prompt when returning from that dialog (including cancellation).
-		if (this.locked && !this.lockScreen.isAuthenticating) this.promptOnReturn = true;
-		if (!this.lockScreen.isAuthenticating && !this.noteGuard.isAuthenticating) this.promptNoteOnReturn = true;
+	private onWindowBlur(promptOnReturn = true): void {
+		if (this.unloaded || this.authenticating) return;
+		this.promptOnReturn = promptOnReturn;
 		this.noteGuard.onFocusChange(false);
 		if (!this.settings.globalAutoLockEnabled || !this.settings.lockOnBlur || this.locked) return;
 		this.resetBlurWatcher();
@@ -312,13 +335,13 @@ export default class TouchIDLockPlugin extends Plugin {
 
 	private onWindowFocus(): void {
 		this.resetBlurWatcher();
+		if (this.unloaded || this.authenticating) return;
 		this.noteGuard.onFocusChange(true);
-		const promptNote = this.promptNoteOnReturn;
-		this.promptNoteOnReturn = false;
-		if (this.locked && this.promptOnReturn) {
-			this.promptOnReturn = false;
+		if (!this.promptOnReturn) return;
+		this.promptOnReturn = false;
+		if (this.locked) {
 			this.lockScreen.promptBiometric();
-		} else if (!this.locked && promptNote) {
+		} else {
 			this.noteGuard.promptActiveNoteBiometric();
 		}
 	}

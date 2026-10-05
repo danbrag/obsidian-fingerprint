@@ -169,6 +169,9 @@ all automatic vault locking while retaining your trigger preferences; the
 explicit **Lock vault now** command still works. Background locking is quiet:
 Touch ID / Windows Hello starts when you return to the app or click **Unlock**.
 Cancelling the prompt leaves the cover in place without immediately prompting again.
+Native-dialog focus changes do not trigger another lock. If you switch apps
+while authentication is already pending, automatic retries are suppressed;
+use **Unlock** to retry.
 
 **Per-note lock** has its own master toggle and these options:
 
@@ -199,7 +202,7 @@ independently tracked. Markdown files remain plaintext.
 
 ### Installing this personal fork
 
-Check out `feature/per-note-auto-relock` from
+Check out `review/relock-architecture` from
 [danbrag/obsidian-fingerprint](https://github.com/danbrag/obsidian-fingerprint),
 then run `npm install` and `npm run build`. With Obsidian closed, copy **only**
 `main.js`, `manifest.json`, and `styles.css` into
@@ -231,6 +234,9 @@ npm run build      # type-checks with tsc, then bundles main.js with esbuild
 ```
 
 `npm run dev` runs an esbuild watcher for iterative development.
+`npm test` runs the focused relock regressions; these do not replace native
+Obsidian/Touch ID verification. See [CODE_REVIEW.md](CODE_REVIEW.md) for the
+review findings and architecture decision.
 
 ## Troubleshooting
 

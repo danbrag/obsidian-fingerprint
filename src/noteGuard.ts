@@ -21,10 +21,10 @@ function isTruthyFlag(value: unknown): boolean {
 export class NoteGuard {
 	private readonly plugin: TouchIDLockPlugin;
 	/** Note paths unlocked for this session; cleared whenever the vault locks. */
-	private readonly unlockedPaths = new Set<string>();
+	private readonly unlockedPaths = new Map<string, number | null>();
+	private revision = 0;
 	private activePath: string | null = null;
 	private focused = document.hasFocus();
-	private readonly awaySince = new Map<string, number>();
 	private awayTimeoutId: number | null = null;
 	/** Overlay currently covering each guarded view container. */
 	private readonly overlays = new Map<HTMLElement, HTMLElement>();
@@ -32,10 +32,6 @@ export class NoteGuard {
 
 	constructor(plugin: TouchIDLockPlugin) {
 		this.plugin = plugin;
-	}
-
-	get isAuthenticating(): boolean {
-		return this.busy;
 	}
 
 	promptActiveNoteBiometric(): void {
@@ -52,7 +48,7 @@ export class NoteGuard {
 	unlockActiveNote(): void {
 		const file = this.app.workspace.getActiveFile();
 		if (!file || !this.isProtected(file)) return;
-		this.unlockedPaths.add(file.path);
+		this.unlockedPaths.set(file.path, null);
 		this.updateAwayTimer();
 		this.refresh();
 	}
@@ -80,23 +76,23 @@ export class NoteGuard {
 
 	/** Re-locks every note. Called when the vault itself locks. */
 	lockAll(): void {
+		this.revision++;
 		this.unlockedPaths.clear();
-		this.awaySince.clear();
 		this.cancelAwayTimer();
 		this.refresh();
 	}
 
 	relock(file: TFile): void {
+		this.revision++;
 		this.unlockedPaths.delete(file.path);
-		this.awaySince.delete(file.path);
 		this.updateAwayTimer();
 		this.refresh();
 	}
 
 	/** Active-note changes revoke only the note being left, never the vault. */
 	onActiveNoteChange(): void {
-		this.expireAwayNotes();
 		const path = this.app.workspace.getActiveFile()?.path ?? null;
+		if (path !== this.activePath) this.revision++;
 		if (path !== this.activePath && this.plugin.settings.relockOnNoteLeave && this.activePath) {
 			this.unlockedPaths.delete(this.activePath);
 		}
@@ -106,8 +102,6 @@ export class NoteGuard {
 	}
 
 	onFocusChange(focused: boolean): void {
-		// Check elapsed time before cancelling the returning note's timer.
-		this.expireAwayNotes();
 		this.focused = focused;
 		if (!focused && this.plugin.settings.perNoteLockEnabled && this.plugin.settings.relockNotesOnBlur) {
 			this.lockAll();
@@ -121,38 +115,25 @@ export class NoteGuard {
 		this.awayTimeoutId = null;
 	}
 
-	private expireAwayNotes(): void {
-		if (!this.plugin.settings.perNoteLockEnabled || !this.plugin.settings.relockNotesAfterAway) return;
-		const delay = this.plugin.settings.relockNotesAwayMinutes * 60_000;
-		for (const [path, since] of this.awaySince) {
-			if (Date.now() - since >= delay) {
-				this.unlockedPaths.delete(path);
-				this.awaySince.delete(path);
-			}
-		}
-	}
-
-	/** One timer for the nearest note deadline; no polling or activity listeners. */
+	/** Unlock state and away timestamps share one map; null means actively viewed. */
 	private updateAwayTimer(): void {
 		this.cancelAwayTimer();
-		if (!this.plugin.settings.perNoteLockEnabled || !this.plugin.settings.relockNotesAfterAway) {
-			this.awaySince.clear();
-			return;
-		}
-		this.expireAwayNotes();
+		const timed = this.plugin.settings.perNoteLockEnabled && this.plugin.settings.relockNotesAfterAway;
+		const delay = this.plugin.settings.relockNotesAwayMinutes * 60_000;
 		const now = Date.now();
-		for (const path of this.awaySince.keys()) {
-			if (!this.unlockedPaths.has(path)) this.awaySince.delete(path);
-		}
-		for (const path of this.unlockedPaths) {
-			if (path === this.activePath && this.focused) {
-				this.awaySince.delete(path);
-			} else if (!this.awaySince.has(path)) {
-				this.awaySince.set(path, now);
+		let deadline = Infinity;
+		for (const [path, since] of this.unlockedPaths) {
+			// Check expiry before resetting a returning note to active.
+			if (timed && since !== null && now - since >= delay) {
+				this.unlockedPaths.delete(path);
+				continue;
 			}
+			const away = timed && (path !== this.activePath || !this.focused);
+			const started = away ? (since ?? now) : null;
+			this.unlockedPaths.set(path, started);
+			if (started !== null) deadline = Math.min(deadline, started + delay);
 		}
-		if (this.awaySince.size === 0) return;
-		const deadline = Math.min(...this.awaySince.values()) + this.plugin.settings.relockNotesAwayMinutes * 60_000;
+		if (!Number.isFinite(deadline)) return;
 		this.awayTimeoutId = window.setTimeout(() => {
 			this.updateAwayTimer();
 			this.refresh();
@@ -197,7 +178,8 @@ export class NoteGuard {
 	/** Removes every overlay, e.g. when the feature is turned off or on unload. */
 	clear(): void {
 		this.cancelAwayTimer();
-		this.awaySince.clear();
+		this.revision++;
+		this.unlockedPaths.clear();
 		for (const [container, overlay] of this.overlays) {
 			overlay.remove();
 			container.removeClass("fingerprint-note-guarded");
@@ -247,17 +229,28 @@ export class NoteGuard {
 		return overlay;
 	}
 
-	private async attemptBiometric(file: TFile, status: HTMLElement, btn: HTMLButtonElement): Promise<void> {
-		if (this.busy) return;
+	private async authenticate<T>(status: HTMLElement, operation: () => Promise<T>): Promise<T | null> {
+		const revision = this.revision;
 		this.busy = true;
+		try {
+			const result = await this.plugin.authenticate(operation);
+			return revision === this.revision && status.isConnected && !this.plugin.isLocked ? result : null;
+		} catch (error) {
+			if (status.isConnected) status.setText(`Authentication failed: ${String(error)}`);
+			return null;
+		} finally {
+			this.busy = false;
+		}
+	}
+
+	private async attemptBiometric(file: TFile, status: HTMLElement, btn: HTMLButtonElement): Promise<void> {
+		if (this.busy || this.plugin.isAuthenticating) return;
 		btn.disabled = true;
 		const method = this.plugin.biometricMethodName;
 		status.setText(`Waiting for ${method}…`);
-
-		const result = await this.plugin.runBiometricAuth();
-		this.busy = false;
+		const result = await this.authenticate(status, () => this.plugin.runBiometricAuth());
 		btn.disabled = false;
-
+		if (!result) return;
 		if (result.status === "success") {
 			this.unlockNote(file, status);
 			return;
@@ -270,15 +263,12 @@ export class NoteGuard {
 	}
 
 	private async attemptSecurityKey(file: TFile, status: HTMLElement, btn: HTMLButtonElement): Promise<void> {
-		if (this.busy) return;
-		this.busy = true;
+		if (this.busy || this.plugin.isAuthenticating) return;
 		btn.disabled = true;
 		status.setText("Waiting for security key… Insert and touch your key.");
-
-		const result = await this.plugin.runSecurityKeyAuth();
-		this.busy = false;
+		const result = await this.authenticate(status, () => this.plugin.runSecurityKeyAuth());
 		btn.disabled = false;
-
+		if (!result) return;
 		if (result.status === "success") {
 			this.unlockNote(file, status);
 			return;
@@ -288,11 +278,9 @@ export class NoteGuard {
 
 	private async attemptPassword(file: TFile, status: HTMLElement, input: HTMLInputElement): Promise<void> {
 		const password = input.value;
-		if (this.busy || !password) return;
-		this.busy = true;
-		const ok = await this.plugin.verifyFallbackPassword(password);
-		this.busy = false;
-
+		if (this.busy || this.plugin.isAuthenticating || !password) return;
+		const ok = await this.authenticate(status, () => this.plugin.verifyFallbackPassword(password));
+		if (ok === null) return;
 		if (ok) {
 			this.unlockNote(file, status);
 			return;
@@ -303,12 +291,9 @@ export class NoteGuard {
 	}
 
 	private unlockNote(file: TFile, status: HTMLElement): void {
-		// Ignore authentication completed after the note was replaced or the
-		// vault locked. A departed note must not become unlocked in the background.
 		if (!status.isConnected || this.plugin.isLocked) return;
 		if (this.plugin.settings.relockOnNoteLeave && this.app.workspace.getActiveFile()?.path !== file.path) return;
-		if (this.plugin.settings.relockNotesOnBlur && !document.hasFocus()) return;
-		this.unlockedPaths.add(file.path);
+		this.unlockedPaths.set(file.path, null);
 		this.updateAwayTimer();
 		this.refresh();
 	}

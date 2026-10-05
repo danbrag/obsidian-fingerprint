@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "tsc --noEmit -p tsconfig.json && node esbuild.config.mjs production",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --test tests/relock.test.cjs"
   },
   "keywords": [
     "obsidian-plugin",

@@ -18,10 +18,6 @@ export class LockScreen {
 		return this.overlayEl !== null;
 	}
 
-	get isAuthenticating(): boolean {
-		return this.busy;
-	}
-
 	/** Called once when returning to a vault that was locked in the background. */
 	promptBiometric(): void {
 		if (this.overlayEl && document.hasFocus() && isBiometricPlatformSupported()) {
@@ -115,7 +111,7 @@ export class LockScreen {
 		document.addEventListener("keyup", this.blockOutsideInput, true);
 		document.addEventListener("mousedown", this.blockOutsideInput, true);
 
-		// Lock quietly. Authentication starts only from an explicit unlock action.
+		// Creating the cover never starts authentication; app return or Unlock does.
 	}
 
 	hide(): void {
@@ -179,16 +175,26 @@ export class LockScreen {
 		);
 	}
 
+	private async authenticate<T>(operation: () => Promise<T>): Promise<T | null> {
+		const overlay = this.overlayEl;
+		try {
+			const result = await this.plugin.authenticate(operation);
+			return overlay && this.overlayEl === overlay ? result : null;
+		} catch (error) {
+			if (overlay && this.overlayEl === overlay) this.setStatus(`Authentication failed: ${String(error)}`, true);
+			return null;
+		} finally {
+			if (this.overlayEl === overlay) this.setBusy(false);
+		}
+	}
+
 	private async attemptBiometric(): Promise<void> {
-		if (this.busy) return;
+		if (this.busy || this.plugin.isAuthenticating) return;
 		this.setBusy(true, `Waiting for ${this.methodName}…`);
 		this.setStatus(`Waiting for ${this.methodName}…`);
 
-		const result = await this.plugin.runBiometricAuth();
-		this.setBusy(false);
-
-		// The vault may have been unlocked another way (e.g. password) while we waited.
-		if (!this.overlayEl) return;
+		const result = await this.authenticate(() => this.plugin.runBiometricAuth());
+		if (!result) return;
 
 		switch (result.status) {
 			case "success":
@@ -207,13 +213,12 @@ export class LockScreen {
 	}
 
 	private async attemptSecurityKey(): Promise<void> {
-		if (this.busy) return;
+		if (this.busy || this.plugin.isAuthenticating) return;
 		this.setBusy(true);
 		this.setStatus("Waiting for security key… Insert and touch your key.");
 
-		const result = await this.plugin.runSecurityKeyAuth();
-		this.setBusy(false);
-		if (!this.overlayEl) return;
+		const result = await this.authenticate(() => this.plugin.runSecurityKeyAuth());
+		if (!result) return;
 
 		switch (result.status) {
 			case "success":
@@ -229,11 +234,10 @@ export class LockScreen {
 	}
 
 	private async attemptPassword(password: string): Promise<void> {
-		if (this.busy || !password) return;
+		if (this.busy || this.plugin.isAuthenticating || !password) return;
 		this.setBusy(true);
-		const ok = await this.plugin.verifyFallbackPassword(password);
-		this.setBusy(false);
-		if (!this.overlayEl) return;
+		const ok = await this.authenticate(() => this.plugin.verifyFallbackPassword(password));
+		if (ok === null) return;
 
 		if (ok) {
 			this.plugin.unlock();

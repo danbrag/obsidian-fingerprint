@@ -340,9 +340,17 @@ export class TouchIDLockSettingTab extends PluginSettingTab {
 			b.setButtonText("Run test").onClick(async () => {
 				b.setDisabled(true);
 				b.setButtonText(`Waiting for ${method}…`);
-				const result = await this.plugin.runBiometricAuth();
-				b.setDisabled(false);
-				b.setButtonText("Run test");
+				let result;
+				try {
+					result = await this.plugin.authenticate(() => this.plugin.runBiometricAuth());
+				} catch (error) {
+					new Notice(`Authentication failed: ${String(error)}`, 8000);
+					return;
+				} finally {
+					b.setDisabled(false);
+					b.setButtonText("Run test");
+				}
+				if (!result) return;
 				if (result.status === "success") {
 					new Notice(`${method} succeeded.`);
 				} else if (result.status === "not-installed") {
@@ -563,9 +571,17 @@ export class TouchIDLockSettingTab extends PluginSettingTab {
 			b.setButtonText("Register").onClick(async () => {
 				b.setDisabled(true);
 				b.setButtonText("Touch your key…");
-				const result = await registerSecurityKey(this.plugin.settings.securityKeys);
-				b.setDisabled(false);
-				b.setButtonText("Register");
+				let result;
+				try {
+					result = await this.plugin.authenticate(() => registerSecurityKey(this.plugin.settings.securityKeys));
+				} catch (error) {
+					new Notice(`Authentication failed: ${String(error)}`, 8000);
+					return;
+				} finally {
+					b.setDisabled(false);
+					b.setButtonText("Register");
+				}
+				if (!result) return;
 				if (result.status === "registered") {
 					this.plugin.settings.securityKeys.push({
 						id: result.id,
