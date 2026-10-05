@@ -51,6 +51,7 @@ class Element {
   setText() {
   }
   focus() {
+    this.focusCount = (this.focusCount ?? 0) + 1;
   }
   addEventListener(name, fn) {
     this.listeners[name] = fn;
@@ -335,4 +336,48 @@ test("focus restored after authentication resolves does not queue another prompt
   p.onWindowFocus();
   assert.equal(calls, 2);
   assert(!p.noteGuard.isUnlocked(a));
+});
+
+
+test("password preference uses saved password and never launches biometrics on return", async () => {
+  const p = fixture();
+  p.settings.passwordHash = "saved-verifier";
+  let biometricCalls = 0;
+  p.runBiometricAuth = async () => { biometricCalls++; return {status: "success"}; };
+  p.verifyFallbackPassword = async password => password === "correct";
+  p.refreshNoteGuard(true);
+  const input = p.noteGuard.overlays.get(view.containerEl).querySelector(".fingerprint-note-password-input");
+  assert(input);
+  assert.equal(p.noteGuard.overlays.get(view.containerEl).querySelector("button.mod-cta"), null);
+  focused = false; p.onWindowBlur(); focused = true; p.onWindowFocus();
+  assert(input.focusCount > 0);
+  assert.equal(biometricCalls, 0);
+  input.value = "incorrect";
+  await p.noteGuard.attemptPassword(a, p.noteGuard.overlays.get(view.containerEl).querySelector(".fingerprint-note-status"), input);
+  assert(!p.noteGuard.isUnlocked(a));
+  input.value = "correct";
+  await p.noteGuard.attemptPassword(a, p.noteGuard.overlays.get(view.containerEl).querySelector(".fingerprint-note-status"), input);
+  assert(p.noteGuard.isUnlocked(a));
+  p.settings.unlockActiveNoteWithVault = true;
+  focused = false; p.lock(); focused = true; p.onWindowFocus();
+  assert(p.lockScreen.passwordInputEl.focusCount > 0);
+  assert.equal(p.lockScreen.biometricButtonEl, null);
+  assert.equal(biometricCalls, 0);
+  await p.lockScreen.attemptPassword("incorrect"); assert(p.isLocked);
+  await p.lockScreen.attemptPassword("correct"); assert(!p.isLocked); assert(p.noteGuard.isUnlocked(a));
+});
+
+test("fingerprint preference restores return prompting and selection needs a saved password", async () => {
+  const p = fixture();
+  const Tab = load("settings").TouchIDLockSettingTab;
+  const tab = new Tab(p.app, p); tab.update = () => {}; p.saveSettings = async () => {};
+  p.settings.preferredUnlockMethod = "biometric";
+  await tab.setControlValue("preferredUnlockMethod", "password");
+  assert.equal(p.settings.preferredUnlockMethod, "biometric");
+  p.settings.passwordHash = "saved-verifier";
+  await tab.setControlValue("preferredUnlockMethod", "password"); assert(p.usesPasswordUnlock);
+  await tab.setControlValue("preferredUnlockMethod", "biometric"); assert(!p.usesPasswordUnlock);
+  let calls = 0; p.runBiometricAuth = async () => { calls++; return {status: "failed", message: "cancelled"}; };
+  focused = false; p.onWindowBlur(); focused = true; p.onWindowFocus();
+  await new Promise(setImmediate); assert.equal(calls, 1);
 });

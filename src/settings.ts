@@ -21,6 +21,7 @@ export interface TouchIDLockSettings {
 	lockOnIdleDelaySeconds: number;
 	/** Prompt text shown in the biometric dialog (Touch ID and Windows Hello alike). */
 	touchIdReason: string;
+	preferredUnlockMethod: "biometric" | "password";
 	passwordFallbackEnabled: boolean;
 	passwordSalt: string;
 	passwordHash: string;
@@ -49,6 +50,7 @@ export const DEFAULT_SETTINGS: TouchIDLockSettings = {
 	lockOnIdle: false,
 	lockOnIdleDelaySeconds: 300,
 	touchIdReason: "unlock your Obsidian vault",
+	preferredUnlockMethod: "password",
 	passwordFallbackEnabled: false,
 	passwordSalt: "",
 	passwordHash: "",
@@ -113,7 +115,7 @@ const PASSWORD_ENCRYPTION_DESC =
 const PER_NOTE_INTRO =
 	"Cover individual notes with an unlock prompt. Add the property below to a note's " +
 	"frontmatter (or use the \"Toggle fingerprint lock for this note\" command) and it stays " +
-	"covered until you authenticate. Choose when notes relock below. Returning to the app prompts for the active locked note when the vault is unlocked.";
+	"covered until you authenticate. Choose when notes relock below. Returning to the app offers your preferred unlock method for the active locked note when the vault is unlocked.";
 
 const PER_NOTE_CAVEAT =
 	"This hides notes in Obsidian's interface — it does not encrypt them. The text remains " +
@@ -163,6 +165,14 @@ export class TouchIDLockSettingTab extends PluginSettingTab {
 			case "touchIdReason":
 				settings.touchIdReason = String(value ?? "").trim() || DEFAULT_SETTINGS.touchIdReason;
 				break;
+			case "preferredUnlockMethod":
+				if (value === "password" && !hasFallbackPassword(settings)) {
+					new Notice("Set a password below before choosing password unlock.");
+					this.update();
+					return;
+				}
+				settings.preferredUnlockMethod = value === "password" ? "password" : "biometric";
+				break;
 			case "passwordFallbackEnabled":
 				if (value === true && !hasFallbackPassword(settings)) {
 					new Notice("Set a password below before turning this on.");
@@ -205,12 +215,13 @@ export class TouchIDLockSettingTab extends PluginSettingTab {
 				return;
 		}
 		await this.plugin.saveSettings();
+		if (key === "preferredUnlockMethod" || key === "passwordFallbackEnabled") this.plugin.refreshNoteGuard(true);
 		if (["perNoteLockEnabled", "lockedNoteProperty", "relockOnNoteLeave", "relockNotesAfterAway", "relockNotesAwayMinutes"].includes(key)) {
 			this.plugin.refreshNoteGuard();
 		}
 		if (key === "lockOnBlur" || key === "globalAutoLockEnabled") this.plugin.resetBlurWatcher();
 		if (["lockOnIdle", "lockOnIdleDelaySeconds", "globalAutoLockEnabled"].includes(key)) this.plugin.resetIdleWatcher();
-		if (["globalAutoLockEnabled", "lockOnBlur", "lockOnIdle", "perNoteLockEnabled", "relockNotesAfterAway"].includes(key)) this.update();
+		if (["globalAutoLockEnabled", "lockOnBlur", "lockOnIdle", "perNoteLockEnabled", "relockNotesAfterAway", "preferredUnlockMethod"].includes(key)) this.update();
 	}
 
 	override getSettingDefinitions(): SettingDefinitionItem[] {
@@ -220,7 +231,7 @@ export class TouchIDLockSettingTab extends PluginSettingTab {
 				name: "",
 				desc:
 					"This is a screen lock, not encryption — your notes are never modified or encrypted on " +
-					"disk. Global locking covers the whole vault and relocks protected notes. Locks quietly in the background. Touch ID / Windows Hello starts when you return or click Unlock.",
+					"disk. Global locking covers the whole vault and relocks protected notes. Locks quietly in the background. Your preferred unlock method is offered when you return or click Unlock.",
 				searchable: false,
 			},
 			{
@@ -278,7 +289,16 @@ export class TouchIDLockSettingTab extends PluginSettingTab {
 			{ type: "group", heading: "Global vault lock", items: globalItems },
 			this.perNoteGroup(),
 		];
-		const biometricItems: SettingGroupItem[] = [];
+		const biometricItems: SettingGroupItem[] = [{
+			name: "Preferred unlock method",
+			desc: "Choose how to unlock the vault and protected notes. Password reuses your saved backup password and stops automatic fingerprint prompts. Without a saved password, fingerprint remains available.",
+			control: {
+				type: "dropdown",
+				key: "preferredUnlockMethod",
+				options: { password: "Password", biometric: method },
+				defaultValue: DEFAULT_SETTINGS.preferredUnlockMethod,
+			},
+		}];
 
 		if (isBiometricPlatformSupported()) {
 			biometricItems.push(
@@ -431,7 +451,7 @@ export class TouchIDLockSettingTab extends PluginSettingTab {
 	private passwordGroup(): SettingDefinitionItem {
 		return {
 			type: "group",
-			heading: "Password fallback",
+			heading: "Password",
 			items: [
 				{
 					name: "",
@@ -440,6 +460,7 @@ export class TouchIDLockSettingTab extends PluginSettingTab {
 				},
 				{
 					name: "Enable password fallback",
+					visible: () => !this.plugin.usesPasswordUnlock,
 					desc: "Show a password field on the lock screen alongside the Touch ID button.",
 					control: { type: "toggle", key: "passwordFallbackEnabled", defaultValue: false },
 				},
@@ -484,6 +505,7 @@ export class TouchIDLockSettingTab extends PluginSettingTab {
 					this.pendingPassword = "";
 					await this.plugin.saveSettings();
 					new Notice("Password saved.");
+					this.plugin.refreshNoteGuard(true);
 					this.update();
 				})
 			);
@@ -500,8 +522,10 @@ export class TouchIDLockSettingTab extends PluginSettingTab {
 					settings.passwordHash = "";
 					settings.passwordVerifier = "";
 					settings.passwordFallbackEnabled = false;
+					settings.preferredUnlockMethod = "biometric";
 					await this.plugin.saveSettings();
 					new Notice("Password cleared.");
+					this.plugin.refreshNoteGuard(true);
 					this.update();
 				})
 		);

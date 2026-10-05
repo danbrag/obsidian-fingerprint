@@ -161,13 +161,24 @@ fallback password. An unlocked note stays open until the vault locks, at
 which point every note re-locks with it.
 
 This personal fork separates **Global vault lock** and **Per-note lock** settings.
-Both use the same biometric, security-key, and password unlock methods.
+Both use the same unlock methods. Under **Unlock methods (vault and notes)**,
+choose **Preferred unlock method → Password** or **Touch ID / Windows Hello**.
+Password is the default when a saved backup password exists; it reuses that
+password, hides the fingerprint button, and focuses password entry on app
+return. Without a saved password, biometric unlock remains available. Choose
+fingerprint to restore automatic biometric prompts on return; the password
+fallback toggle controls whether password is also offered in that mode.
+Changing the method or password relocks protected notes so their unlock cards
+reflect the new choice. The combined vault/note unlock toggle works with either
+method. Security keys remain independently configurable.
 
 **Global vault lock** has an **Enable global vault lock** master toggle plus
 startup, time-away, and inactivity triggers. Turning the master off disables
 all automatic vault locking while retaining your trigger preferences; the
 explicit **Lock vault now** command still works. Background locking is quiet:
-Touch ID / Windows Hello starts when you return to the app or click **Unlock**.
+Your chosen unlock method is offered when you return to the app: fingerprint
+starts its dialog, while password focuses the entry field. **Unlock** remains
+available explicitly.
 Cancelling the prompt leaves the cover in place without immediately prompting again.
 Native-dialog focus changes do not trigger another lock. If you switch apps
 while authentication is already pending, automatic retries are suppressed;
@@ -190,7 +201,7 @@ use **Unlock** to retry.
   require separate authentication.
 
 All new per-note options default off. When returning to the app with the vault
-unlocked, Touch ID / Windows Hello starts for the active locked protected note.
+unlocked, the chosen method is offered for the active locked protected note.
 Opening a locked note within the app still offers its **Unlock** button.
 
 Per-note options affect protected notes only and never invoke the vault lock.

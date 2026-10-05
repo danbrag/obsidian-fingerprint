@@ -19,7 +19,11 @@ export class LockScreen {
 	}
 
 	/** Called once when returning to a vault that was locked in the background. */
-	promptBiometric(): void {
+	promptUnlock(): void {
+		if (this.plugin.usesPasswordUnlock) {
+			if (document.hasFocus()) this.passwordInputEl?.focus();
+			return;
+		}
 		if (this.overlayEl && document.hasFocus() && isBiometricPlatformSupported()) {
 			void this.attemptBiometric();
 		}
@@ -34,13 +38,13 @@ export class LockScreen {
 	}
 
 	private passwordFallbackAvailable(): boolean {
-		return this.plugin.settings.passwordFallbackEnabled && this.plugin.hasFallbackPassword;
+		return this.plugin.hasPasswordUnlock;
 	}
 
 	show(): void {
 		if (this.overlayEl) return;
 
-		const biometricsSupported = isBiometricPlatformSupported();
+		const biometricsSupported = isBiometricPlatformSupported() && !this.plugin.usesPasswordUnlock;
 		const securityKeys = this.securityKeysEnabled();
 
 		const overlay = createDiv({ cls: "fingerprint-lock-overlay" });
@@ -50,7 +54,9 @@ export class LockScreen {
 		card.createDiv({ cls: "fingerprint-lock-title", text: "Vault locked" });
 
 		let initialStatus: string;
-		if (biometricsSupported) {
+		if (this.plugin.usesPasswordUnlock) {
+			initialStatus = "Enter your password to continue.";
+		} else if (biometricsSupported) {
 			initialStatus = `Use ${this.methodName} to continue.`;
 		} else if (securityKeys) {
 			initialStatus = "Use your security key to continue.";
@@ -104,6 +110,7 @@ export class LockScreen {
 		this.passwordInputEl = passwordInput;
 		this.biometricButtonEl = biometricBtn;
 		this.securityKeyButtonEl = securityKeyBtn;
+		if (this.plugin.usesPasswordUnlock && document.hasFocus()) passwordInput?.focus();
 
 		// Swallow keyboard/mouse input outside the overlay while locked, so hotkeys
 		// and clicks can't reach the underlying vault while it's supposed to be hidden.

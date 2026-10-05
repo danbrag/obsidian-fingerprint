@@ -34,11 +34,16 @@ export class NoteGuard {
 		this.plugin = plugin;
 	}
 
-	promptActiveNoteBiometric(): void {
-		if (!document.hasFocus() || !isBiometricPlatformSupported()) return;
+	promptActiveNoteUnlock(): void {
+		if (!document.hasFocus()) return;
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (!view?.file) return;
 		const overlay = this.overlays.get(view.containerEl);
+		if (this.plugin.usesPasswordUnlock) {
+			overlay?.querySelector<HTMLInputElement>(".fingerprint-note-password-input")?.focus();
+			return;
+		}
+		if (!isBiometricPlatformSupported()) return;
 		const status = overlay?.querySelector<HTMLElement>(".fingerprint-note-status");
 		const button = overlay?.querySelector<HTMLButtonElement>("button.mod-cta");
 		if (status && button) void this.attemptBiometric(view.file, status, button);
@@ -200,7 +205,7 @@ export class NoteGuard {
 		const method = this.plugin.biometricMethodName;
 
 		const buttons = card.createDiv({ cls: "fingerprint-note-buttons" });
-		if (isBiometricPlatformSupported()) {
+		if (isBiometricPlatformSupported() && !this.plugin.usesPasswordUnlock) {
 			const btn = buttons.createEl("button", {
 				cls: "mod-cta",
 				text: `Unlock with ${method}`,
@@ -212,9 +217,9 @@ export class NoteGuard {
 			btn.addEventListener("click", () => void this.attemptSecurityKey(file, status, btn));
 		}
 
-		if (this.plugin.settings.passwordFallbackEnabled && this.plugin.hasFallbackPassword) {
+		if (this.plugin.hasPasswordUnlock) {
 			const row = card.createDiv({ cls: "fingerprint-note-password-row" });
-			const input = row.createEl("input", { type: "password", placeholder: "Password" });
+			const input = row.createEl("input", { cls: "fingerprint-note-password-input", type: "password", placeholder: "Password" });
 			const submit = row.createEl("button", { text: "Unlock" });
 			const attempt = () => void this.attemptPassword(file, status, input);
 			submit.addEventListener("click", attempt);
@@ -224,6 +229,7 @@ export class NoteGuard {
 					attempt();
 				}
 			});
+			if (this.plugin.usesPasswordUnlock && document.hasFocus() && this.app.workspace.getActiveFile()?.path === file.path) input.focus();
 		}
 
 		return overlay;

@@ -51,3 +51,10 @@ In particular, check Touch ID focus restoration on the actual machine.
   is resumed afterward, but an automatic retry is suppressed. Use Unlock to retry.
 - Files remain plaintext. This review does not claim encryption or a security
   boundary against plugins, file access, search, or previews.
+
+## Password preference follow-up
+
+The shared unlock-method selector now supports password as the primary method
+for both vault and note locks, reusing the saved backup password. The test set
+now contains twelve regressions, including password-first return behavior,
+incorrect/correct passwords, combined unlock, and switching back to fingerprint.

@@ -130,7 +130,8 @@ export default class TouchIDLockPlugin extends Plugin {
 	}
 
 	/** Re-applies note overlays, e.g. after the per-note settings change. */
-	refreshNoteGuard(): void {
+	refreshNoteGuard(reset = false): void {
+		if (reset) this.noteGuard.clear();
 		if (this.settings.perNoteLockEnabled) {
 			this.noteGuard.onActiveNoteChange();
 		} else {
@@ -217,13 +218,21 @@ export default class TouchIDLockPlugin extends Plugin {
 	}
 
 	private hasUsableUnlockMethod(): boolean {
-		if (this.settings.passwordFallbackEnabled && this.hasFallbackPassword) return true;
+		if (this.hasPasswordUnlock) return true;
 		if (this.settings.securityKeyEnabled && this.settings.securityKeys.length > 0) return true;
 		return isBiometricPlatformSupported() && this.isNativeHelperReady;
 	}
 
 	get hasFallbackPassword(): boolean {
 		return hasFallbackPassword(this.settings);
+	}
+
+	get usesPasswordUnlock(): boolean {
+		return this.settings.preferredUnlockMethod === "password" && this.hasFallbackPassword;
+	}
+
+	get hasPasswordUnlock(): boolean {
+		return this.hasFallbackPassword && (this.usesPasswordUnlock || this.settings.passwordFallbackEnabled);
 	}
 
 	/** Checks a typed password against whichever storage format is configured. */
@@ -340,9 +349,9 @@ export default class TouchIDLockPlugin extends Plugin {
 		if (!this.promptOnReturn) return;
 		this.promptOnReturn = false;
 		if (this.locked) {
-			this.lockScreen.promptBiometric();
+			this.lockScreen.promptUnlock();
 		} else {
-			this.noteGuard.promptActiveNoteBiometric();
+			this.noteGuard.promptActiveNoteUnlock();
 		}
 	}
 }
