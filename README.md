@@ -160,21 +160,42 @@ the vault lock screen — Touch ID or Windows Hello, a security key, or your
 fallback password. An unlocked note stays open until the vault locks, at
 which point every note re-locks with it.
 
-This personal fork adds two settings under **Per-note lock**, both off by default:
+This personal fork separates **Global vault lock** and **Per-note lock** settings.
+Both use the same biometric, security-key, and password unlock methods.
 
-- **Relock when leaving note** — switching from protected Note A to another
-  note revokes A's unlock. Returning to A requires authentication again.
-- **Relock protected notes when Obsidian loses focus** — relocks all protected
-  notes immediately when the main Obsidian window loses focus.
+**Global vault lock** has an **Enable global vault lock** master toggle plus
+startup, time-away, and inactivity triggers. Turning the master off disables
+all automatic vault locking while retaining your trigger preferences; the
+explicit **Lock vault now** command still works. Background locking is quiet:
+Touch ID / Windows Hello starts when you return to the app or click **Unlock**.
+Cancelling the prompt leaves the cover in place without immediately prompting again.
 
-These options affect protected notes only and do not lock the vault. Existing
-global **Lock on blur** and **Lock on idle** settings still operate independently;
-turn them off if you want only protected notes to relock. Unlock state is shared
-by note path across panes: switching to a different note relocks the previous
-note in every pane, while switching between panes of the same note keeps it
-unlocked. Focus-loss handling uses the existing main-window listener; separate
-pop-out windows are not independently tracked. Per-note inactivity relocking
-is not implemented. Markdown files remain plaintext.
+**Per-note lock** has its own master toggle and these options:
+
+- **Lock when notes change** — immediately revoke the previous protected
+  note's unlock when switching to a different note.
+- **Lock notes when switching apps** — immediately relock all protected notes
+  when the main Obsidian window loses focus.
+- **Lock after time away from a note** — relock an unlocked note after a
+  configurable number of minutes away (default five; minimum one). Time
+  in another app counts. Returning before expiry cancels that note's timer;
+  reading the active note does not count as time away. The immediate-lock
+  options take priority when enabled.
+- **Unlock the active protected note with the vault** — optionally reuse one
+  successful vault authentication for the active protected note. Other
+  protected notes remain locked. With this off, vault and note unlocks
+  require separate authentication.
+
+All new per-note options default off. When returning to the app with the vault
+unlocked, Touch ID / Windows Hello starts for the active locked protected note.
+Opening a locked note within the app still offers its **Unlock** button.
+
+Per-note options affect protected notes only and never invoke the vault lock.
+Unlock state is shared by note path across panes: switching to a different
+note relocks the previous note in every pane when immediate relocking is on;
+switching between panes of the same note keeps it unlocked. Focus-loss handling
+uses the existing main-window listener; separate pop-out windows are not
+independently tracked. Markdown files remain plaintext.
 
 ### Installing this personal fork
 
@@ -184,7 +205,7 @@ then run `npm install` and `npm run build`. With Obsidian closed, copy **only**
 `main.js`, `manifest.json`, and `styles.css` into
 `<YourVault>/.obsidian/plugins/fingerprint-lock/` (create it if needed). Preserve
 any existing `data.json` and `native/` folder. Reopen Obsidian and enable
-**Fingerprint Lock**, then enable **Lock individual notes** and the desired
+**Fingerprint Lock**, then enable **Enable per-note lock** and the desired
 relock options. The native helpers are bundled into `main.js` and set up on load.
 Community-plugin updates can overwrite this personal build; reinstall these
 three files if that happens.

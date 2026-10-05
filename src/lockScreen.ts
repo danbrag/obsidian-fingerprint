@@ -18,6 +18,17 @@ export class LockScreen {
 		return this.overlayEl !== null;
 	}
 
+	get isAuthenticating(): boolean {
+		return this.busy;
+	}
+
+	/** Called once when returning to a vault that was locked in the background. */
+	promptBiometric(): void {
+		if (this.overlayEl && document.hasFocus() && isBiometricPlatformSupported()) {
+			void this.attemptBiometric();
+		}
+	}
+
 	private get methodName(): string {
 		return this.plugin.biometricMethodName;
 	}
@@ -104,9 +115,7 @@ export class LockScreen {
 		document.addEventListener("keyup", this.blockOutsideInput, true);
 		document.addEventListener("mousedown", this.blockOutsideInput, true);
 
-		if (biometricsSupported) {
-			void this.attemptBiometric();
-		}
+		// Lock quietly. Authentication starts only from an explicit unlock action.
 	}
 
 	hide(): void {

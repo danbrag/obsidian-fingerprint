@@ -12,6 +12,8 @@ import { getBiometricMethodName, getBiometricPlatform, isBiometricPlatformSuppor
 import { isWebAuthnAvailable, registerSecurityKey, type SecurityKeyInfo } from "./webauthn";
 
 export interface TouchIDLockSettings {
+	globalAutoLockEnabled: boolean;
+	unlockActiveNoteWithVault: boolean;
 	lockOnStartup: boolean;
 	lockOnBlur: boolean;
 	lockOnBlurDelaySeconds: number;
@@ -32,11 +34,15 @@ export interface TouchIDLockSettings {
 	perNoteLockEnabled: boolean;
 	relockOnNoteLeave: boolean;
 	relockNotesOnBlur: boolean;
+	relockNotesAfterAway: boolean;
+	relockNotesAwayMinutes: number;
 	/** Frontmatter property that marks a note as locked. */
 	lockedNoteProperty: string;
 }
 
 export const DEFAULT_SETTINGS: TouchIDLockSettings = {
+	globalAutoLockEnabled: true,
+	unlockActiveNoteWithVault: false,
 	lockOnStartup: true,
 	lockOnBlur: true,
 	lockOnBlurDelaySeconds: 30,
@@ -53,6 +59,8 @@ export const DEFAULT_SETTINGS: TouchIDLockSettings = {
 	perNoteLockEnabled: false,
 	relockOnNoteLeave: false,
 	relockNotesOnBlur: false,
+	relockNotesAfterAway: false,
+	relockNotesAwayMinutes: 5,
 	lockedNoteProperty: "fingerprint-lock",
 };
 
@@ -105,7 +113,7 @@ const PASSWORD_ENCRYPTION_DESC =
 const PER_NOTE_INTRO =
 	"Cover individual notes with an unlock prompt. Add the property below to a note's " +
 	"frontmatter (or use the \"Toggle fingerprint lock for this note\" command) and it stays " +
-	"covered until you authenticate. Unlocked notes re-lock when the vault locks.";
+	"covered until you authenticate. Choose when notes relock below. Returning to the app prompts for the active locked note when the vault is unlocked.";
 
 const PER_NOTE_CAVEAT =
 	"This hides notes in Obsidian's interface — it does not encrypt them. The text remains " +
@@ -141,6 +149,8 @@ export class TouchIDLockSettingTab extends PluginSettingTab {
 	override async setControlValue(key: string, value: unknown): Promise<void> {
 		const settings = this.plugin.settings;
 		switch (key) {
+			case "globalAutoLockEnabled":
+			case "unlockActiveNoteWithVault":
 			case "lockOnStartup":
 			case "lockOnBlur":
 			case "lockOnIdle":
@@ -171,8 +181,14 @@ export class TouchIDLockSettingTab extends PluginSettingTab {
 			case "perNoteLockEnabled":
 			case "relockOnNoteLeave":
 			case "relockNotesOnBlur":
+			case "relockNotesAfterAway":
 				settings[key] = value === true;
 				break;
+			case "relockNotesAwayMinutes": {
+				const minutes = Number(value);
+				settings.relockNotesAwayMinutes = Number.isFinite(minutes) ? Math.min(1440, Math.max(1, minutes)) : 5;
+				break;
+			}
 			case "lockedNoteProperty":
 				settings.lockedNoteProperty =
 					String(value ?? "").trim() || DEFAULT_SETTINGS.lockedNoteProperty;
@@ -189,39 +205,45 @@ export class TouchIDLockSettingTab extends PluginSettingTab {
 				return;
 		}
 		await this.plugin.saveSettings();
-		if (key === "perNoteLockEnabled" || key === "lockedNoteProperty") {
+		if (["perNoteLockEnabled", "lockedNoteProperty", "relockOnNoteLeave", "relockNotesAfterAway", "relockNotesAwayMinutes"].includes(key)) {
 			this.plugin.refreshNoteGuard();
 		}
-		if (key === "lockOnBlur") this.plugin.resetBlurWatcher();
-		if (key === "lockOnIdle" || key === "lockOnIdleDelaySeconds") this.plugin.resetIdleWatcher();
-		if (key === "lockOnBlur" || key === "lockOnIdle") this.update();
+		if (key === "lockOnBlur" || key === "globalAutoLockEnabled") this.plugin.resetBlurWatcher();
+		if (["lockOnIdle", "lockOnIdleDelaySeconds", "globalAutoLockEnabled"].includes(key)) this.plugin.resetIdleWatcher();
+		if (["globalAutoLockEnabled", "lockOnBlur", "lockOnIdle", "perNoteLockEnabled", "relockNotesAfterAway"].includes(key)) this.update();
 	}
 
 	override getSettingDefinitions(): SettingDefinitionItem[] {
 		const method = getBiometricMethodName();
-		const items: SettingDefinitionItem[] = [
+		const globalItems: SettingGroupItem[] = [
 			{
 				name: "",
 				desc:
 					"This is a screen lock, not encryption — your notes are never modified or encrypted on " +
-					`disk. It hides the Obsidian interface and requires ${method} (or a security key or fallback ` +
-					"password) to see it again.",
+					"disk. Global locking covers the whole vault and relocks protected notes. Locks quietly in the background. Touch ID / Windows Hello starts when you return or click Unlock.",
 				searchable: false,
 			},
 			{
+				name: "Enable global vault lock",
+				desc: "Enable the global triggers below. Turn off to use per-note locking only. Lock vault now remains available.",
+				control: { type: "toggle", key: "globalAutoLockEnabled", defaultValue: true },
+			},
+			{
 				name: "Lock on startup",
+				visible: () => this.plugin.settings.globalAutoLockEnabled,
 				desc: "Show the lock screen immediately whenever Obsidian opens this vault.",
 				control: { type: "toggle", key: "lockOnStartup", defaultValue: DEFAULT_SETTINGS.lockOnStartup },
 			},
 			{
 				name: "Lock when Obsidian loses focus",
+				visible: () => this.plugin.settings.globalAutoLockEnabled,
 				desc: "Lock after the app has been in the background for the delay below.",
 				control: { type: "toggle", key: "lockOnBlur", defaultValue: DEFAULT_SETTINGS.lockOnBlur },
 			},
 			{
-				name: "Lock-on-blur delay (seconds)",
+				name: "Time away before locking (seconds)",
 				desc: "How long Obsidian can sit unfocused before it locks. 0 locks instantly.",
-				visible: () => this.plugin.settings.lockOnBlur,
+				visible: () => this.plugin.settings.globalAutoLockEnabled && this.plugin.settings.lockOnBlur,
 				control: {
 					type: "number",
 					key: "lockOnBlurDelaySeconds",
@@ -233,13 +255,14 @@ export class TouchIDLockSettingTab extends PluginSettingTab {
 			},
 			{
 				name: "Lock after inactivity",
+				visible: () => this.plugin.settings.globalAutoLockEnabled,
 				desc: "Lock automatically if there's no mouse or keyboard activity for a while.",
 				control: { type: "toggle", key: "lockOnIdle", defaultValue: DEFAULT_SETTINGS.lockOnIdle },
 			},
 			{
-				name: "Idle delay (seconds)",
+				name: "Time inactive before locking (seconds)",
 				desc: "How long the vault can sit idle before it locks.",
-				visible: () => this.plugin.settings.lockOnIdle,
+				visible: () => this.plugin.settings.globalAutoLockEnabled && this.plugin.settings.lockOnIdle,
 				control: {
 					type: "number",
 					key: "lockOnIdleDelaySeconds",
@@ -251,8 +274,14 @@ export class TouchIDLockSettingTab extends PluginSettingTab {
 			},
 		];
 
+		const items: SettingDefinitionItem[] = [
+			{ type: "group", heading: "Global vault lock", items: globalItems },
+			this.perNoteGroup(),
+		];
+		const biometricItems: SettingGroupItem[] = [];
+
 		if (isBiometricPlatformSupported()) {
-			items.push(
+			biometricItems.push(
 				{
 					name: `${method} prompt reason`,
 					desc: `Shown inside the ${method} dialog, e.g. "unlock your Obsidian vault".`,
@@ -272,8 +301,8 @@ export class TouchIDLockSettingTab extends PluginSettingTab {
 		}
 
 		items.push(
+			{ type: "group", heading: "Unlock methods (vault and notes)", items: biometricItems },
 			...this.securityKeyItems(),
-			this.perNoteGroup(),
 			this.passwordGroup(),
 			...this.helperInfoItems()
 		);
@@ -340,21 +369,42 @@ export class TouchIDLockSettingTab extends PluginSettingTab {
 				{ name: "", desc: PER_NOTE_INTRO, searchable: false },
 				{ name: "", desc: PER_NOTE_CAVEAT, searchable: false },
 				{
-					name: "Lock individual notes",
+					name: "Enable per-note lock",
+					aliases: ["Lock individual notes"],
 					desc: "Cover flagged notes until you authenticate.",
 					control: { type: "toggle", key: "perNoteLockEnabled", defaultValue: false },
 				},
 				{
-					name: "Relock when leaving note",
-					desc: "Relock a protected note when you switch to another note or pane. The vault stays unlocked.",
+					name: "Lock when notes change",
+					aliases: ["Relock when leaving note"],
+					desc: "Relock a protected note when you switch to a different note. The vault stays unlocked.",
 					visible: () => this.plugin.settings.perNoteLockEnabled,
 					control: { type: "toggle", key: "relockOnNoteLeave", defaultValue: false },
 				},
 				{
-					name: "Relock protected notes when Obsidian loses focus",
-					desc: "Relock all protected notes on window focus loss, independently of the global lock on blur setting.",
+					name: "Lock notes when switching apps",
+					aliases: ["Relock protected notes when Obsidian loses focus"],
+					desc: "Immediately relock all protected notes when Obsidian loses focus. Overrides the time-away grace period; does not lock the vault.",
 					visible: () => this.plugin.settings.perNoteLockEnabled,
 					control: { type: "toggle", key: "relockNotesOnBlur", defaultValue: false },
+				},
+				{
+					name: "Lock after time away from a note",
+					desc: "Give unlocked notes a grace period when you leave them or switch apps. Lock when notes change takes priority.",
+					visible: () => this.plugin.settings.perNoteLockEnabled,
+					control: { type: "toggle", key: "relockNotesAfterAway", defaultValue: false },
+				},
+				{
+					name: "Time away before locking (minutes)",
+					desc: "Return before this time to keep the note unlocked. Time spent in another app counts; reading the active note does not.",
+					visible: () => this.plugin.settings.perNoteLockEnabled && this.plugin.settings.relockNotesAfterAway,
+					control: { type: "number", key: "relockNotesAwayMinutes", min: 1, max: 1440, step: 1, defaultValue: 5 },
+				},
+				{
+					name: "Unlock the active protected note with the vault",
+					desc: "One successful vault unlock also unlocks the protected note you are viewing. Turn off to require a separate note unlock. Other protected notes stay locked.",
+					visible: () => this.plugin.settings.perNoteLockEnabled,
+					control: { type: "toggle", key: "unlockActiveNoteWithVault", defaultValue: false },
 				},
 				{
 					name: "Frontmatter property",

@@ -35,6 +35,8 @@ export default class TouchIDLockPlugin extends Plugin {
 	/** Why the last helper setup attempt failed, so the lock screen can explain. */
 	helperSetupError: string | null = null;
 	private locked = false;
+	private promptOnReturn = false;
+	private promptNoteOnReturn = false;
 
 	private blurTimeoutId: number | null = null;
 	private idleIntervalId: number | null = null;
@@ -133,7 +135,7 @@ export default class TouchIDLockPlugin extends Plugin {
 	/** Re-applies note overlays, e.g. after the per-note settings change. */
 	refreshNoteGuard(): void {
 		if (this.settings.perNoteLockEnabled) {
-			this.noteGuard.refresh();
+			this.noteGuard.onActiveNoteChange();
 		} else {
 			this.noteGuard.clear();
 		}
@@ -190,6 +192,7 @@ export default class TouchIDLockPlugin extends Plugin {
 	lock(): void {
 		if (this.locked) return;
 		this.locked = true;
+		this.promptOnReturn = !document.hasFocus();
 		// Re-lock individual notes alongside the vault, so unlocking the vault
 		// doesn't silently hand back notes that were opened earlier.
 		this.noteGuard.lockAll();
@@ -202,7 +205,7 @@ export default class TouchIDLockPlugin extends Plugin {
 	 * the Touch ID helper not yet built and no fallback password).
 	 */
 	private startupLock(): void {
-		if (!this.settings.lockOnStartup) return;
+		if (!this.settings.globalAutoLockEnabled || !this.settings.lockOnStartup) return;
 		if (!this.hasUsableUnlockMethod()) {
 			new Notice(
 				`Vault was NOT locked: no unlock method is available. Build the ${this.biometricMethodName} ` +
@@ -235,8 +238,10 @@ export default class TouchIDLockPlugin extends Plugin {
 
 	unlock(): void {
 		this.locked = false;
+		this.promptOnReturn = false;
 		this.lockScreen.hide();
 		this.lastActivityAt = Date.now();
+		if (this.settings.unlockActiveNoteWithVault) this.noteGuard.unlockActiveNote();
 	}
 
 	get isLocked(): boolean {
@@ -278,11 +283,11 @@ export default class TouchIDLockPlugin extends Plugin {
 			window.clearInterval(this.idleIntervalId);
 			this.idleIntervalId = null;
 		}
-		if (!this.settings.lockOnIdle) return;
+		if (!this.settings.globalAutoLockEnabled || !this.settings.lockOnIdle) return;
 
 		this.lastActivityAt = Date.now();
 		this.idleIntervalId = window.setInterval(() => {
-			if (this.locked || !this.settings.lockOnIdle) return;
+			if (this.locked || !this.settings.globalAutoLockEnabled || !this.settings.lockOnIdle) return;
 			const idleSeconds = (Date.now() - this.lastActivityAt) / 1000;
 			if (idleSeconds >= this.settings.lockOnIdleDelaySeconds) {
 				this.lock();
@@ -291,10 +296,12 @@ export default class TouchIDLockPlugin extends Plugin {
 	}
 
 	private onWindowBlur(): void {
-		if (this.settings.perNoteLockEnabled && this.settings.relockNotesOnBlur) {
-			this.noteGuard.lockAll();
-		}
-		if (!this.settings.lockOnBlur || this.locked) return;
+		// Native authentication dialogs can also blur Obsidian. Do not queue
+		// another prompt when returning from that dialog (including cancellation).
+		if (this.locked && !this.lockScreen.isAuthenticating) this.promptOnReturn = true;
+		if (!this.lockScreen.isAuthenticating && !this.noteGuard.isAuthenticating) this.promptNoteOnReturn = true;
+		this.noteGuard.onFocusChange(false);
+		if (!this.settings.globalAutoLockEnabled || !this.settings.lockOnBlur || this.locked) return;
 		this.resetBlurWatcher();
 		const delayMs = Math.max(0, this.settings.lockOnBlurDelaySeconds * 1000);
 		this.blurTimeoutId = window.setTimeout(() => {
@@ -305,5 +312,14 @@ export default class TouchIDLockPlugin extends Plugin {
 
 	private onWindowFocus(): void {
 		this.resetBlurWatcher();
+		this.noteGuard.onFocusChange(true);
+		const promptNote = this.promptNoteOnReturn;
+		this.promptNoteOnReturn = false;
+		if (this.locked && this.promptOnReturn) {
+			this.promptOnReturn = false;
+			this.lockScreen.promptBiometric();
+		} else if (!this.locked && promptNote) {
+			this.noteGuard.promptActiveNoteBiometric();
+		}
 	}
 }
