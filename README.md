@@ -215,11 +215,29 @@ independently tracked. Markdown files remain plaintext.
 
 Check out `review/relock-architecture` from
 [danbrag/obsidian-fingerprint](https://github.com/danbrag/obsidian-fingerprint),
-then run `npm install` and `npm run build`. With Obsidian closed, copy **only**
-`main.js`, `manifest.json`, and `styles.css` into
-`<YourVault>/.obsidian/plugins/fingerprint-lock/` (create it if needed). Preserve
-any existing `data.json` and `native/` folder. Reopen Obsidian and enable
-**Fingerprint Lock**, then enable **Enable per-note lock** and the desired
+then run `npm install` and `npm run build`, or use the ready-to-copy folder
+already included in this branch:
+
+```text
+plugins/
+└── fingerprint-lock/
+    ├── main.js
+    ├── manifest.json
+    └── styles.css
+```
+
+Every production build refreshes these three files. With Obsidian closed,
+copy the **fingerprint-lock** folder into `<YourVault>/.obsidian/plugins/`.
+If updating an existing installation, merge the files into its folder,
+preserving `data.json` and `native/`. For example, from this repository:
+
+```bash
+vault="/absolute/path/to/YourVault"
+mkdir -p "$vault/.obsidian/plugins"
+cp -R plugins/fingerprint-lock "$vault/.obsidian/plugins/"
+```
+
+Reopen Obsidian and enable **Fingerprint Lock**, then turn on **Enable per-note lock** and the desired
 relock options. The native helpers are bundled into `main.js` and set up on load.
 Community-plugin updates can overwrite this personal build; reinstall these
 three files if that happens.

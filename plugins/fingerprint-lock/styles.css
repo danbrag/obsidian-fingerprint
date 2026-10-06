@@ -1,0 +1,154 @@
+.fingerprint-lock-overlay {
+	position: fixed;
+	inset: 0;
+	z-index: 9999;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: var(--background-primary);
+	backdrop-filter: blur(24px);
+	-webkit-app-region: drag;
+}
+
+.fingerprint-lock-card {
+	-webkit-app-region: no-drag;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 0.75em;
+	padding: 2.5em 3em;
+	border-radius: var(--radius-l, 12px);
+	background: var(--background-secondary);
+	box-shadow: var(--shadow-l, 0 8px 30px rgba(0, 0, 0, 0.25));
+	min-width: 280px;
+	max-width: 420px;
+	text-align: center;
+}
+
+.fingerprint-lock-icon {
+	font-size: 2.5em;
+	line-height: 1;
+	margin-bottom: 0.1em;
+}
+
+.fingerprint-lock-title {
+	font-size: 1.3em;
+	font-weight: 600;
+	color: var(--text-normal);
+}
+
+.fingerprint-lock-status {
+	font-size: 0.9em;
+	color: var(--text-muted);
+	min-height: 1.4em;
+}
+
+.fingerprint-lock-status-error {
+	color: var(--text-error, #e06c75);
+}
+
+.fingerprint-lock-unlock-btn {
+	margin-top: 0.25em;
+	min-width: 220px;
+}
+
+.fingerprint-lock-password-row {
+	display: flex;
+	gap: 0.5em;
+	margin-top: 0.5em;
+}
+
+.fingerprint-lock-password-input {
+	flex: 1;
+	min-width: 0;
+}
+
+.fingerprint-setup-helper-status {
+	margin: 0.5em 0 1em;
+	font-size: 0.9em;
+	color: var(--text-muted);
+}
+
+.fingerprint-setup-status-ok {
+	color: var(--text-success, var(--text-accent));
+}
+
+.fingerprint-setup-status-warn {
+	color: var(--text-warning, var(--text-error));
+}
+
+.fingerprint-hidden {
+	display: none;
+}
+
+/* --- Per-note lock ---------------------------------------------------- */
+
+.fingerprint-note-guarded {
+	position: relative;
+}
+
+.fingerprint-note-overlay {
+	position: absolute;
+	inset: 0;
+	z-index: 20;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 1em;
+	/* Opaque, so the note underneath can't be read through the overlay. */
+	background: var(--background-primary);
+}
+
+.fingerprint-note-card {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 0.6em;
+	max-width: 420px;
+	padding: 2em 2.5em;
+	border-radius: var(--radius-l, 12px);
+	background: var(--background-secondary);
+	box-shadow: var(--shadow-l, 0 8px 30px rgba(0, 0, 0, 0.25));
+	text-align: center;
+}
+
+.fingerprint-note-icon {
+	font-size: 2em;
+	line-height: 1;
+}
+
+.fingerprint-note-title {
+	font-size: 1.1em;
+	font-weight: 600;
+	color: var(--text-normal);
+}
+
+.fingerprint-note-name {
+	font-size: 0.9em;
+	color: var(--text-muted);
+	word-break: break-word;
+}
+
+.fingerprint-note-status {
+	font-size: 0.85em;
+	color: var(--text-muted);
+	min-height: 1.2em;
+}
+
+.fingerprint-note-buttons {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5em;
+	justify-content: center;
+}
+
+.fingerprint-note-password-row {
+	display: flex;
+	gap: 0.5em;
+	width: 100%;
+}
+
+.fingerprint-note-password-row input {
+	flex: 1;
+	min-width: 0;
+}
