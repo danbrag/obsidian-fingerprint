@@ -23,6 +23,7 @@ import {
 import { authenticateSecurityKey, type SecurityKeyResult } from "./webauthn";
 
 const IDLE_CHECK_INTERVAL_MS = 5_000;
+const AUTH_FOCUS_SETTLE_MS = 1_000;
 const ACTIVITY_EVENTS: Array<keyof DocumentEventMap> = ["mousemove", "mousedown", "keydown", "scroll", "wheel"];
 
 export default class TouchIDLockPlugin extends Plugin {
@@ -46,7 +47,14 @@ export default class TouchIDLockPlugin extends Plugin {
 	private firstRun = false;
 
 	async onload(): Promise<void> {
-		await this.loadSettings();
+		// CSS conceals restored markdown views even while settings are loading.
+		document.body.removeClass("fingerprint-note-lock-disabled");
+		try {
+			await this.loadSettings();
+		} catch (error) {
+			document.body.addClass("fingerprint-note-lock-disabled");
+			throw error;
+		}
 		if (this.unloaded) return;
 
 		const pluginDir = this.manifest.dir ?? "";
@@ -84,6 +92,9 @@ export default class TouchIDLockPlugin extends Plugin {
 		this.registerEvent(this.app.workspace.on("layout-change", refreshGuard));
 		this.registerEvent(this.app.workspace.on("active-leaf-change", activeNoteChanged));
 		this.registerEvent(this.app.metadataCache.on("changed", refreshGuard));
+		this.registerEvent(this.app.metadataCache.on("resolved", refreshGuard));
+		// Guard existing panes now; do not wait for onLayoutReady or helper setup.
+		this.noteGuard.onActiveNoteChange();
 
 		this.registerDomEvent(window, "blur", () => this.onWindowBlur());
 		this.registerDomEvent(window, "focus", () => this.onWindowFocus());
@@ -177,6 +188,7 @@ export default class TouchIDLockPlugin extends Plugin {
 		if (this.idleIntervalId !== null) window.clearInterval(this.idleIntervalId);
 		this.lockScreen?.hide();
 		this.noteGuard?.clear();
+		document.body.addClass("fingerprint-note-lock-disabled");
 	}
 
 	async loadSettings(): Promise<void> {
@@ -264,6 +276,10 @@ export default class TouchIDLockPlugin extends Plugin {
 	/** Serialize vault/note unlocks and keep native-dialog blur out of lock policy. */
 	async authenticate<T>(operation: () => Promise<T>): Promise<T | null> {
 		if (this.authenticating || this.unloaded) return null;
+		if (this.authFocusTimeoutId !== null) window.clearTimeout(this.authFocusTimeoutId);
+		this.authFocusTimeoutId = null;
+		this.resetBlurWatcher();
+		this.promptOnReturn = false;
 		this.authenticating = true;
 		try {
 			const result = await operation();
@@ -271,13 +287,15 @@ export default class TouchIDLockPlugin extends Plugin {
 		} finally {
 			this.authenticating = false;
 			this.lastActivityAt = Date.now();
-			// Let renderer focus settle after the native dialog closes. If the
-			// user really switched apps, apply lock policy without queuing a retry.
-			if (!this.unloaded && !document.hasFocus()) {
+			// Native helper completion can precede macOS restoring renderer focus
+			// by several event-loop turns. Suppress late dialog blur events too.
+			// If the app stays in the background, reconcile policy after this
+			// bounded grace period without queuing another authentication prompt.
+			if (!this.unloaded) {
 				this.authFocusTimeoutId = window.setTimeout(() => {
 					this.authFocusTimeoutId = null;
 					if (!this.unloaded && !document.hasFocus()) this.onWindowBlur(false);
-				}, 0);
+				}, AUTH_FOCUS_SETTLE_MS);
 			}
 		}
 	}
@@ -330,7 +348,7 @@ export default class TouchIDLockPlugin extends Plugin {
 	}
 
 	private onWindowBlur(promptOnReturn = true): void {
-		if (this.unloaded || this.authenticating) return;
+		if (this.unloaded || this.authenticating || this.authFocusTimeoutId !== null) return;
 		this.promptOnReturn = promptOnReturn;
 		this.noteGuard.onFocusChange(false);
 		if (!this.settings.globalAutoLockEnabled || !this.settings.lockOnBlur || this.locked) return;
@@ -339,12 +357,15 @@ export default class TouchIDLockPlugin extends Plugin {
 		this.blurTimeoutId = window.setTimeout(() => {
 			this.blurTimeoutId = null;
 			this.lock();
+			if (!promptOnReturn) this.promptOnReturn = false;
 		}, delayMs);
 	}
 
 	private onWindowFocus(): void {
 		this.resetBlurWatcher();
 		if (this.unloaded || this.authenticating) return;
+		if (this.authFocusTimeoutId !== null) window.clearTimeout(this.authFocusTimeoutId);
+		this.authFocusTimeoutId = null;
 		this.noteGuard.onFocusChange(true);
 		if (!this.promptOnReturn) return;
 		this.promptOnReturn = false;

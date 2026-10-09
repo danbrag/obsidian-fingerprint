@@ -1,7 +1,8 @@
 # Relock implementation review
 
 Reviewed the completed feature at `df7d4db`. Improvements are on
-`review/relock-architecture`; the original feature branch remains available.
+the maintained `main` baseline, consolidated from `review/relock-architecture`.
+The original feature and review branches remain available as historical references.
 
 ## Findings and fixes
 
@@ -44,7 +45,7 @@ In particular, check Touch ID focus restoration on the actual machine.
 ## Remaining scope limits
 
 - Focus handling follows the main Obsidian window; independent pop-out windows
-  remain outside this personal fork's scope.
+  remain outside the current implementation's scope.
 - Note unlock state is shared by path across panes. Per-note time away follows
   the active note rather than whether the note is visible in another pane.
 - If the user switches apps while authentication is already pending, lock policy
@@ -58,3 +59,28 @@ The shared unlock-method selector now supports password as the primary method
 for both vault and note locks, reusing the saved backup password. The test set
 now contains twelve regressions, including password-first return behavior,
 incorrect/correct passwords, combined unlock, and switching back to fingerprint.
+
+## Touch ID focus restoration follow-up
+
+The zero-delay focus reconciliation could run before macOS returned focus from
+Touch ID and immediately relock a successfully unlocked note. Authentication now
+allows one second for focus restoration, suppresses late dialog blur events, and
+cancels reconciliation on focus return or a new authentication attempt. If the
+app stays in the background, relocking still resumes without an automatic retry,
+including when the global blur timer locks the vault. The fifteen regressions
+cover delayed focus return, late blur, sustained background state, overlapping
+reconciliation timers, and unload cleanup. Native Touch ID acceptance still
+requires testing in Obsidian on the user's Mac.
+
+## Startup note concealment follow-up
+
+The stylesheet now hides markdown view content until NoteGuard explicitly marks
+it visible. Startup enables this concealment before awaiting settings and
+classifies existing views before layout readiness or native-helper setup.
+Missing metadata gets a provisional cover without unlock controls, then metadata
+change/resolution events replace it with either the normal lock card or visible
+ordinary content. Disabling/unloading removes concealment; a settings-load
+failure also releases the provisional startup state. Nineteen state regressions
+pass, including delayed metadata and pre-layout startup. Actual cold-launch
+paint timing still needs checking in Obsidian; no plugin can hide rendering that
+precedes its stylesheet loading.

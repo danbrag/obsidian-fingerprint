@@ -28,6 +28,7 @@ export class NoteGuard {
 	private awayTimeoutId: number | null = null;
 	/** Overlay currently covering each guarded view container. */
 	private readonly overlays = new Map<HTMLElement, HTMLElement>();
+	private readonly reviewedContainers = new Set<HTMLElement>();
 	private busy = false;
 
 	constructor(plugin: TouchIDLockPlugin) {
@@ -148,6 +149,8 @@ export class NoteGuard {
 	/** Adds or removes an overlay on every open markdown view, as needed. */
 	refresh(): void {
 		const seen = new Set<HTMLElement>();
+		const openContainers = new Set<HTMLElement>();
+		document.body.toggleClass("fingerprint-note-lock-disabled", !this.plugin.settings.perNoteLockEnabled);
 
 		for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
 			const view = leaf.view;
@@ -155,19 +158,25 @@ export class NoteGuard {
 
 			const container = view.containerEl;
 			const file = view.file;
-			const shouldGuard = this.isProtected(file) && file !== null && !this.isUnlocked(file);
+			// Unknown metadata must not reveal a restored note before its flag is read.
+			const pending = file !== null && this.plugin.settings.perNoteLockEnabled &&
+				!!this.propertyName && this.app.metadataCache.getFileCache(file) === null;
+			const shouldGuard = file !== null && (pending || this.isProtected(file)) && !this.isUnlocked(file);
+			openContainers.add(container);
+			this.reviewedContainers.add(container);
+			container.toggleClass("fingerprint-note-visible", !shouldGuard);
 			if (!shouldGuard || !file) continue;
 
 			seen.add(container);
 			// A leaf can switch directly between two locked notes. Its unlock
 			// buttons must refer to the new file, not the previous overlay's file.
 			const existing = this.overlays.get(container);
-			if (existing && existing.dataset.notePath !== file.path) {
+			if (existing && (existing.dataset.notePath !== file.path || existing.dataset.pending !== String(pending))) {
 				existing.remove();
 				this.overlays.delete(container);
 			}
 			if (!this.overlays.has(container)) {
-				this.overlays.set(container, this.createOverlay(container, file));
+				this.overlays.set(container, this.createOverlay(container, file, pending));
 			}
 		}
 
@@ -177,6 +186,11 @@ export class NoteGuard {
 			overlay.remove();
 			container.removeClass("fingerprint-note-guarded");
 			this.overlays.delete(container);
+		}
+		for (const container of this.reviewedContainers) {
+			if (openContainers.has(container)) continue;
+			container.removeClass("fingerprint-note-visible");
+			this.reviewedContainers.delete(container);
 		}
 	}
 
@@ -190,13 +204,21 @@ export class NoteGuard {
 			container.removeClass("fingerprint-note-guarded");
 		}
 		this.overlays.clear();
+		for (const container of this.reviewedContainers) container.removeClass("fingerprint-note-visible");
+		this.reviewedContainers.clear();
+		document.body.addClass("fingerprint-note-lock-disabled");
 	}
 
-	private createOverlay(container: HTMLElement, file: TFile): HTMLElement {
+	private createOverlay(container: HTMLElement, file: TFile, pending = false): HTMLElement {
 		container.addClass("fingerprint-note-guarded");
 		const overlay = container.createDiv({ cls: "fingerprint-note-overlay" });
 		overlay.dataset.notePath = file.path;
+		overlay.dataset.pending = String(pending);
 		const card = overlay.createDiv({ cls: "fingerprint-note-card" });
+		if (pending) {
+			card.createDiv({ cls: "fingerprint-note-title", text: "Checking note protection…" });
+			return overlay;
+		}
 		card.createDiv({ cls: "fingerprint-note-icon", text: "\u{1F512}" });
 		card.createDiv({ cls: "fingerprint-note-title", text: "This note is locked" });
 		card.createDiv({ cls: "fingerprint-note-name", text: file.basename });

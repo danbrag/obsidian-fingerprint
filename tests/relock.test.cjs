@@ -29,6 +29,7 @@ class Element {
     this.dataset = {};
     this.connected = true;
     this.listeners = {};
+	this.classes = new Set();
   }
   get isConnected() {
     return this.connected && (!this.parent || this.parent.isConnected);
@@ -42,11 +43,14 @@ class Element {
   createEl(tag, opts) {
     return this.createDiv({ tag, ...opts });
   }
-  addClass() {
+  addClass(name) {
+	this.classes.add(name);
   }
-  removeClass() {
+  removeClass(name) {
+	this.classes.delete(name);
   }
-  toggleClass() {
+  toggleClass(name, enabled) {
+	if (enabled) this.addClass(name); else this.removeClass(name);
   }
   setText() {
   }
@@ -81,7 +85,7 @@ class MarkdownView {
 const document = { hasFocus: () => focused, body: new Element(), addEventListener() {
 }, removeEventListener() {
 } };
-const native = { isBiometricPlatformSupported: () => true, getBiometricMethodName: () => "Touch ID", getBiometricPlatform: () => "touchid" };
+const native = { isBiometricPlatformSupported: () => true, getBiometricMethodName: () => "Touch ID", getBiometricPlatform: () => "touchid", getNativeHelperPath: () => null, getNativeDir: () => null };
 const modules = {};
 function load(name) {
   if (modules[name]) return modules[name].exports;
@@ -119,6 +123,7 @@ function fixture() {
   now = 0;
   focused = true;
   timers.clear();
+  document.body = new Element();
   active = a;
   view.file = a;
   view.containerEl = new Element();
@@ -301,7 +306,7 @@ test("disabling per-note locking or unloading revokes pending results", async ()
   p.lock();
   assert(!p.lockScreen.isVisible);
 });
-test("focus restored after authentication resolves does not queue another prompt", async () => {
+test("delayed native focus restoration keeps a note unlocked without another prompt", async () => {
   const p = fixture();
   p.settings.relockNotesOnBlur = true;
   const auth = deferred();
@@ -315,9 +320,14 @@ test("focus restored after authentication resolves does not queue another prompt
   p.onWindowBlur();
   auth.resolve({ status: "success" });
   await pending;
+  advance(250);
+  assert(p.noteGuard.isUnlocked(a));
+  p.onWindowBlur(); // A late blur event from the closing native dialog.
+  advance(250);
+  assert(p.noteGuard.isUnlocked(a));
   focused = true;
   p.onWindowFocus();
-  advance(0);
+  advance(1000);
   assert.equal(calls, 1);
   assert(p.noteGuard.isUnlocked(a));
   p.noteGuard.lockAll();
@@ -331,11 +341,76 @@ test("focus restored after authentication resolves does not queue another prompt
   p.onWindowBlur();
   cancelled.resolve({ status: "failed", message: "cancelled" });
   await retry;
-  advance(0);
+  advance(1000);
   focused = true;
   p.onWindowFocus();
   assert.equal(calls, 2);
   assert(!p.noteGuard.isUnlocked(a));
+});
+
+test("late dialog blur after helper completion does not immediately relock the vault", async () => {
+  const p = fixture();
+  p.settings.globalAutoLockEnabled = true;
+  p.settings.lockOnBlurDelaySeconds = 0;
+  p.lock();
+  p.runBiometricAuth = async () => ({ status: "success" });
+  await p.lockScreen.attemptBiometric();
+  focused = false;
+  p.onWindowBlur();
+  advance(300);
+  assert(!p.isLocked);
+  focused = true;
+  p.onWindowFocus();
+  advance(1000);
+  assert(!p.isLocked);
+  // A later genuine app switch must still apply normal lock policy.
+  focused = false;
+  p.onWindowBlur();
+  advance(0);
+  assert(p.isLocked);
+});
+
+test("remaining in the background after authentication still relocks notes and vault", async () => {
+  const p = fixture(), auth = deferred();
+  p.settings.relockNotesOnBlur = true;
+  p.settings.globalAutoLockEnabled = true;
+  p.settings.lockOnBlurDelaySeconds = 0;
+  let calls = 0;
+  p.runBiometricAuth = () => { calls++; return auth.promise; };
+  const pending = noteAttempt(p);
+  focused = false;
+  p.onWindowBlur();
+  auth.resolve({ status: "success" });
+  await pending;
+  advance(999);
+  assert(p.noteGuard.isUnlocked(a));
+  assert(!p.isLocked);
+  advance(1);
+  assert(!p.noteGuard.isUnlocked(a));
+  advance(0);
+  assert(p.isLocked);
+  focused = true;
+  p.onWindowFocus();
+  assert.equal(calls, 1);
+});
+
+test("new authentication cancels previous focus reconciliation and unload clears it", async () => {
+  const p = fixture();
+  p.settings.relockNotesOnBlur = true;
+  p.runBiometricAuth = async () => ({ status: "failed", message: "cancelled" });
+  focused = false;
+  await noteAttempt(p);
+  advance(500);
+  const auth = deferred();
+  p.runBiometricAuth = () => auth.promise;
+  const pending = noteAttempt(p);
+  advance(500);
+  auth.resolve({ status: "success" });
+  await pending;
+  assert(p.noteGuard.isUnlocked(a));
+  assert.equal(timers.size, 1);
+  p.onunload();
+  assert.equal(timers.size, 0);
 });
 
 
@@ -380,4 +455,82 @@ test("fingerprint preference restores return prompting and selection needs a sav
   let calls = 0; p.runBiometricAuth = async () => { calls++; return {status: "failed", message: "cancelled"}; };
   focused = false; p.onWindowBlur(); focused = true; p.onWindowFocus();
   await new Promise(setImmediate); assert.equal(calls, 1);
+});
+
+test("restored note stays concealed while metadata loads, then requires authentication", async () => {
+  const p = fixture();
+  let cache = null;
+  p.app.metadataCache.getFileCache = () => cache;
+  p.noteGuard.refresh();
+  assert(!view.containerEl.classes.has("fingerprint-note-visible"));
+  const pendingCover = p.noteGuard.overlays.get(view.containerEl);
+  assert.equal(pendingCover.dataset.pending, "true");
+  assert.equal(pendingCover.querySelector("button.mod-cta"), null);
+  cache = { frontmatter: { "fingerprint-lock": true } };
+  p.noteGuard.refresh();
+  assert(!pendingCover.isConnected);
+  assert(!view.containerEl.classes.has("fingerprint-note-visible"));
+  assert(p.noteGuard.overlays.get(view.containerEl).querySelector("button.mod-cta"));
+  p.runBiometricAuth = async () => ({ status: "success" });
+  await noteAttempt(p);
+  assert(view.containerEl.classes.has("fingerprint-note-visible"));
+  p.noteGuard.relock(a);
+  assert(!view.containerEl.classes.has("fingerprint-note-visible"));
+});
+
+test("unknown ordinary note appears only after metadata confirms it is unprotected", () => {
+  const p = fixture();
+  let cache = null;
+  p.app.metadataCache.getFileCache = () => cache;
+  p.noteGuard.refresh();
+  assert(!view.containerEl.classes.has("fingerprint-note-visible"));
+  cache = {}; // Known metadata without frontmatter is an ordinary note.
+  p.noteGuard.refresh();
+  assert(view.containerEl.classes.has("fingerprint-note-visible"));
+  assert.equal(p.noteGuard.overlays.size, 0);
+  p.settings.perNoteLockEnabled = false;
+  p.refreshNoteGuard();
+  assert(document.body.classes.has("fingerprint-note-lock-disabled"));
+  assert(!view.containerEl.classes.has("fingerprint-note-visible"));
+  p.settings.perNoteLockEnabled = true;
+  cache = { frontmatter: { "fingerprint-lock": true } };
+  p.refreshNoteGuard();
+  assert(!document.body.classes.has("fingerprint-note-lock-disabled"));
+  assert(!view.containerEl.classes.has("fingerprint-note-visible"));
+  p.onunload();
+  assert(document.body.classes.has("fingerprint-note-lock-disabled"));
+});
+
+test("startup guards restored panes before layout ready and refreshes on metadata resolution", async () => {
+  const p = fixture(), settings = deferred();
+  document.body.addClass("fingerprint-note-lock-disabled");
+  p.manifest = {};
+  p.loadSettings = () => settings.promise;
+  p.addSettingTab = p.addRibbonIcon = p.addCommand = p.registerEvent = p.registerDomEvent = () => {};
+  const listeners = {};
+  p.app.workspace.on = (name, callback) => { listeners[name] = callback; };
+  let layoutCallback;
+  p.app.workspace.onLayoutReady = callback => { layoutCallback = callback; };
+  p.app.metadataCache.on = (name, callback) => { listeners[name] = callback; };
+  let cache = null;
+  p.app.metadataCache.getFileCache = () => cache;
+  const loading = p.onload();
+  assert(!document.body.classes.has("fingerprint-note-lock-disabled"));
+  settings.resolve();
+  await loading;
+  assert(layoutCallback); // Not invoked: workspace restoration is still pending.
+  assert.equal(p.noteGuard.overlays.get(view.containerEl).dataset.pending, "true");
+  assert(!view.containerEl.classes.has("fingerprint-note-visible"));
+  cache = { frontmatter: { "fingerprint-lock": true } };
+  listeners.resolved();
+  assert.equal(p.noteGuard.overlays.get(view.containerEl).dataset.pending, "false");
+  assert(!view.containerEl.classes.has("fingerprint-note-visible"));
+  p.onunload();
+});
+
+test("settings-load failure releases the provisional startup concealment", async () => {
+  const p = fixture();
+  p.loadSettings = async () => { throw Error("settings read failed"); };
+  await assert.rejects(p.onload(), /settings read failed/);
+  assert(document.body.classes.has("fingerprint-note-lock-disabled"));
 });

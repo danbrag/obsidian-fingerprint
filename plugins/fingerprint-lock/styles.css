@@ -83,6 +83,13 @@
 
 /* --- Per-note lock ---------------------------------------------------- */
 
+/* Loaded with the plugin, before async settings/workspace restoration finishes.
+   Reveal content only after NoteGuard has classified the restored view. */
+body:not(.fingerprint-note-lock-disabled) .workspace-leaf-content[data-type="markdown"]:not(.fingerprint-note-visible) > .view-content,
+body:not(.fingerprint-note-lock-disabled) .workspace-leaf-content[data-type="markdown"]:not(.fingerprint-note-visible) > .view-content * {
+	visibility: hidden !important;
+}
+
 .fingerprint-note-guarded {
 	position: relative;
 }

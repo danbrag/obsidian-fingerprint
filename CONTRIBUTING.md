@@ -5,6 +5,11 @@ Alex Paz's Fingerprint Lock. Preserve the MIT license and original attribution.
 The upstream community-plugin listing and upstream releases distribute the
 upstream plugin; use this repository's build instructions for this fork.
 
+`main` is the maintained baseline. It includes the completed per-note relocking,
+unlock preference, Touch ID focus, startup concealment, and public-repository
+policy work. Feature/review branches are historical references; start new work
+from `main` and keep production package copies in sync with source.
+
 ## What belongs in Git
 
 Commit TypeScript and native helper **sources**, CSS, tests, public project

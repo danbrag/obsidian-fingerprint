@@ -2,17 +2,16 @@
 
 This repository is the independently maintained
 [danbrag/obsidian-fingerprint](https://github.com/danbrag/obsidian-fingerprint)
-fork of Alex Paz's Fingerprint Lock. See **Installing this personal fork** below
-for the build and copy instructions. The community listing and upstream release
-links in this README install the upstream plugin. Contributor and commit rules
-are in [CONTRIBUTING.md](CONTRIBUTING.md).
+fork of Alex Paz's Fingerprint Lock, maintained by **danbrag**.
+`main` is the maintained baseline and includes independent vault/note relocking,
+password or biometric preference, Touch ID focus handling, and startup note
+concealment. Contributor and commit rules are in
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 **Device support:** this build is desktop-only (`isDesktopOnly: true`). Obsidian
 mobile will report “This plugin does not support your device” even when sync is
 configured correctly. Mobile support requires changes to the desktop Node API
 imports and authentication implementation, not just the manifest flag.
-
-[![Available in the Obsidian community plugins directory](https://img.shields.io/badge/Obsidian-Install%20from%20directory-7c3aed?logo=obsidian&logoColor=white)](https://community.obsidian.md/plugins/fingerprint-lock)
 
 Locks Obsidian behind a full-screen lock screen and unlocks it with your
 fingerprint — **macOS Touch ID** or **Windows Hello** (fingerprint, face, or
@@ -42,47 +41,50 @@ the scan and the helper only relays a yes/no answer.
 
 ## Install
 
-### From the Obsidian community plugins directory (recommended)
+### Install this fork from main
 
-**[Install Fingerprint Lock](https://community.obsidian.md/plugins/fingerprint-lock)** — or, inside
-Obsidian: **Settings → Community plugins** → turn off "Restricted mode" →
-**Browse** → search for *Fingerprint Lock* → **Install**, then **Enable**.
+Check out `main` from
+[danbrag/obsidian-fingerprint](https://github.com/danbrag/obsidian-fingerprint),
+then run `npm ci` and `npm run build`, or use the ready-to-copy folder
+already included in `main`:
 
-That's the whole install. There is **nothing to build and no terminal step**:
-the first time the plugin loads it writes its native helper into the plugin
-folder and, on macOS, compiles and signs it for you, then offers to set a
-fallback password. Installing this way also means Obsidian keeps the plugin
-updated for you.
-
-On macOS the automatic build needs the Xcode Command Line Tools (most
-developer Macs already have them). If they're missing, the plugin says so and
-you can install them with `xcode-select --install`, then press **Rebuild
-helper** in the plugin's settings. Your password fallback works either way.
-
-### Manually, without the directory
-
-Prefer to install by hand, or want to run an unreleased build? Download
-`main.js`, `manifest.json` and `styles.css` from the
-[latest release](https://github.com/alexpazzy/obsidian-fingerprint/releases/latest)
-and put them in a folder in your vault:
-
-```
-<YourVault>/.obsidian/plugins/fingerprint-lock/
-├── main.js
-├── manifest.json
-└── styles.css
+```text
+plugins/
+└── fingerprint-lock/
+    ├── main.js
+    ├── manifest.json
+    └── styles.css
 ```
 
-Then enable it under **Settings → Community plugins**. The helper sources are
-bundled inside `main.js`, so this path sets itself up exactly like the
-directory install does.
-
-Release assets carry [GitHub artifact attestations](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations),
-so you can verify they were built from this repository:
+Every production build refreshes these three files. With Obsidian closed,
+copy the **fingerprint-lock** folder into `<YourVault>/.obsidian/plugins/`.
+If updating an existing installation, merge the files into its folder,
+preserving `data.json` and `native/`. For example, from this repository:
 
 ```bash
-gh attestation verify main.js -R alexpazzy/obsidian-fingerprint
+vault="/absolute/path/to/YourVault"
+mkdir -p "$vault/.obsidian/plugins"
+cp -R plugins/fingerprint-lock "$vault/.obsidian/plugins/"
 ```
+
+Reopen Obsidian and enable **Fingerprint Lock**, then turn on **Enable per-note lock** and the desired
+relock options. The native helpers are bundled into `main.js` and set up on load.
+The existing `fingerprint-lock` plugin ID is retained so this build can update
+an existing installation. The upstream community listing installs the original
+plugin; community-plugin updates can overwrite this fork. Reinstall these three
+files if that happens.
+
+On macOS the automatic helper build needs the Xcode Command Line Tools.
+If they are missing, install them with `xcode-select --install`, then press
+**Rebuild helper** in the plugin settings. Password unlock works without
+the helper.
+
+### Original project
+
+This fork builds on [Alex Paz's Fingerprint Lock](https://github.com/alexpazzy/obsidian-fingerprint).
+The [Obsidian community listing](https://community.obsidian.md/plugins/fingerprint-lock)
+distributes that original project. Its releases are separate from this fork.
+Original copyright and MIT license attribution are preserved in [LICENSE](LICENSE).
 
 ### Building the native helper yourself (optional)
 
@@ -172,7 +174,14 @@ the vault lock screen — Touch ID or Windows Hello, a security key, or your
 fallback password. An unlocked note stays open until the vault locks, at
 which point every note re-locks with it.
 
-This personal fork separates **Global vault lock** and **Per-note lock** settings.
+During startup, markdown content stays hidden until the plugin has loaded its
+settings and checked the note's metadata. If metadata is still loading, a
+“Checking note protection…” cover remains until the note can be classified.
+Protected notes stay concealed until unlocked; ordinary notes appear after the
+check. This starts when the plugin's stylesheet loads and cannot cover any
+Obsidian rendering that happens before the plugin is loaded.
+
+The plugin separates **Global vault lock** and **Per-note lock** settings.
 Both use the same unlock methods. Under **Unlock methods (vault and notes)**,
 choose **Preferred unlock method → Password** or **Touch ID / Windows Hello**.
 Password is the default when a saved backup password exists; it reuses that
@@ -192,7 +201,8 @@ Your chosen unlock method is offered when you return to the app: fingerprint
 starts its dialog, while password focuses the entry field. **Unlock** remains
 available explicitly.
 Cancelling the prompt leaves the cover in place without immediately prompting again.
-Native-dialog focus changes do not trigger another lock. If you switch apps
+After authentication, focus has a one-second grace period to return from the
+native dialog before background relocking resumes. If you switch apps
 while authentication is already pending, automatic retries are suppressed;
 use **Unlock** to retry.
 
@@ -223,37 +233,6 @@ switching between panes of the same note keeps it unlocked. Focus-loss handling
 uses the existing main-window listener; separate pop-out windows are not
 independently tracked. Markdown files remain plaintext.
 
-### Installing this personal fork
-
-Check out `review/relock-architecture` from
-[danbrag/obsidian-fingerprint](https://github.com/danbrag/obsidian-fingerprint),
-then run `npm install` and `npm run build`, or use the ready-to-copy folder
-already included in this branch:
-
-```text
-plugins/
-└── fingerprint-lock/
-    ├── main.js
-    ├── manifest.json
-    └── styles.css
-```
-
-Every production build refreshes these three files. With Obsidian closed,
-copy the **fingerprint-lock** folder into `<YourVault>/.obsidian/plugins/`.
-If updating an existing installation, merge the files into its folder,
-preserving `data.json` and `native/`. For example, from this repository:
-
-```bash
-vault="/absolute/path/to/YourVault"
-mkdir -p "$vault/.obsidian/plugins"
-cp -R plugins/fingerprint-lock "$vault/.obsidian/plugins/"
-```
-
-Reopen Obsidian and enable **Fingerprint Lock**, then turn on **Enable per-note lock** and the desired
-relock options. The native helpers are bundled into `main.js` and set up on load.
-Community-plugin updates can overwrite this personal build; reinstall these
-three files if that happens.
-
 > [!warning]
 > **This hides notes; it does not encrypt them.** The text stays plaintext on
 > disk and is readable by any other plugin, by your sync client, and by
@@ -270,13 +249,14 @@ three files if that happens.
 If you want to modify the plugin itself rather than just use it:
 
 ```bash
-npm install
+npm ci
 npm run build      # type-checks with tsc, then bundles main.js with esbuild
 ```
 
 `npm run dev` runs an esbuild watcher for iterative development.
-`npm test` runs the focused relock regressions; these do not replace native
-Obsidian/Touch ID verification. See [CODE_REVIEW.md](CODE_REVIEW.md) for the
+`npm test` runs 19 lock/startup regressions and six repository-policy tests.
+`npm run check:repo` checks public-file rules and package parity.
+These automated checks do not replace native Obsidian/Touch ID verification. See [CODE_REVIEW.md](CODE_REVIEW.md) for the
 review findings and architecture decision.
 
 ## Troubleshooting
