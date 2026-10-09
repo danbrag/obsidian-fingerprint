@@ -5,3 +5,45 @@ data.json
 native/Obsidian
 native/touchid-auth
 node_modules/
+
+# Vaults, local settings, credentials, and signing material.
+.obsidian/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.mobileprovision
+.aws/
+.ssh/
+
+# Local editor/agent state and scratch work.
+.idea/
+.vscode/
+.codex/
+.agents/
+.artifacts/
+.worktrees/
+scratch/
+tmp/
+*.log
+*.swp
+*.swo
+*~
+
+# Generated development outputs. Release bundles are intentionally tracked.
+coverage/
+dist/
+build/
+*.tsbuildinfo
+*.map
+
+# Only the three distributable files belong in the copyable plugin package.
+plugins/*
+!plugins/fingerprint-lock/
+plugins/fingerprint-lock/*
+!plugins/fingerprint-lock/main.js
+!plugins/fingerprint-lock/manifest.json
+!plugins/fingerprint-lock/styles.css

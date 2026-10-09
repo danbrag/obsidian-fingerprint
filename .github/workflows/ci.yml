@@ -1,0 +1,26 @@
+name: Validate
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      # Check the submitted artifacts before the build can overwrite them.
+      - run: npm run check:repo
+      - run: npm test
+      - run: npm run build
+      - run: npm run check:repo
+      - name: Verify committed production artifacts
+        run: git diff --exit-code -- main.js plugins/fingerprint-lock/

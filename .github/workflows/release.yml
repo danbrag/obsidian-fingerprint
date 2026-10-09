@@ -27,7 +27,11 @@ jobs:
       - name: Build
         run: |
           npm ci
+          npm run check:repo
+          npm test
           npm run build
+          npm run check:repo
+          git diff --exit-code -- main.js plugins/fingerprint-lock/
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v2

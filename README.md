@@ -1,5 +1,17 @@
 # Fingerprint Lock
 
+This repository is the independently maintained
+[danbrag/obsidian-fingerprint](https://github.com/danbrag/obsidian-fingerprint)
+fork of Alex Paz's Fingerprint Lock. See **Installing this personal fork** below
+for the build and copy instructions. The community listing and upstream release
+links in this README install the upstream plugin. Contributor and commit rules
+are in [CONTRIBUTING.md](CONTRIBUTING.md).
+
+**Device support:** this build is desktop-only (`isDesktopOnly: true`). Obsidian
+mobile will report “This plugin does not support your device” even when sync is
+configured correctly. Mobile support requires changes to the desktop Node API
+imports and authentication implementation, not just the manifest flag.
+
 [![Available in the Obsidian community plugins directory](https://img.shields.io/badge/Obsidian-Install%20from%20directory-7c3aed?logo=obsidian&logoColor=white)](https://community.obsidian.md/plugins/fingerprint-lock)
 
 Locks Obsidian behind a full-screen lock screen and unlocks it with your

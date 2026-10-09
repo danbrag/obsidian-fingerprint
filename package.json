@@ -7,7 +7,9 @@
     "dev": "node esbuild.config.mjs",
     "build": "tsc --noEmit -p tsconfig.json && node esbuild.config.mjs production",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --test tests/relock.test.cjs"
+    "test": "node --test tests/relock.test.cjs tests/repo-policy.test.cjs",
+    "check:repo": "node scripts/check-repo.mjs",
+    "check:staged": "node scripts/check-repo.mjs --staged"
   },
   "keywords": [
     "obsidian-plugin",
